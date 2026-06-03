@@ -146,6 +146,7 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 	s.logger.DebugContext(ctx, "making authenticated API request",
 		slog.String("header content", headers["Content-Type"]),
 		slog.String("header auth", headers["Authorization"]),
+		slog.String("header accept", headers["Accept"]),
 		slog.String("method", method),
 		slog.String("body", body),
 	)

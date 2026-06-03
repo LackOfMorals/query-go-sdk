@@ -2,233 +2,262 @@ package query
 
 import (
 	"log/slog"
+	"net/http"
 	"os"
 	"testing"
 	"time"
 )
 
-// TestNewClient_Success verifies successful client creation with credentials
-func TestNewClient_Success(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-	)
-
+func TestNewClient_WithBasicAuth_Success(t *testing.T) {
+	client, err := NewClient(WithBasicAuth("neo4j", "password"))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if client == nil {
 		t.Fatal("expected client to be non-nil")
 	}
-	if client.api == nil {
-		t.Error("expected api service to be initialized")
-	}
-	if client.logger == nil {
-		t.Error("expected logger to be initialized")
+	if client.Query == nil {
+		t.Error("expected Query service to be initialized")
 	}
 }
 
-// TestNewClient_SubServicesInitialized verifies all sub-services are created
-func TestNewClient_SubServicesInitialized(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-	)
-
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if client.Tenants == nil {
-		t.Error("expected Tenants service to be initialized")
-	}
-	if client.Instances == nil {
-		t.Error("expected Instances service to be initialized")
-	}
-	if client.Snapshots == nil {
-		t.Error("expected Snapshots service to be initialized")
-	}
-	if client.CMEK == nil {
-		t.Error("expected CMEK service to be initialized")
-	}
-	if client.GraphAnalytics == nil {
-		t.Error("expected GraphAnalytics service to be initialized")
-	}
-	if client.Prometheus == nil {
-		t.Error("expected Prometheus service to be initialized")
-	}
-}
-
-// TestNewClient_EmptyCredentials validates both credentials must be provided
-func TestNewClient_EmptyCredentials(t *testing.T) {
-	tests := []struct {
-		name         string
-		clientID     string
-		clientSecret string
-		expectedErr  string
-	}{
-		{
-			name:         "both empty",
-			clientID:     "",
-			clientSecret: "",
-			expectedErr:  "client ID must not be empty",
-		},
-		{
-			name:         "empty ID only",
-			clientID:     "",
-			clientSecret: "secret",
-			expectedErr:  "client ID must not be empty",
-		},
-		{
-			name:         "empty secret only",
-			clientID:     "id",
-			clientSecret: "",
-			expectedErr:  "client secret must not be empty",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewClient(WithCredentials(tt.clientID, tt.clientSecret))
-
-			if err == nil {
-				t.Error("expected error, got nil")
-			}
-			if err.Error() != tt.expectedErr {
-				t.Errorf("expected error '%s', got '%s'", tt.expectedErr, err.Error())
-			}
-			if client != nil {
-				t.Error("expected client to be nil")
-			}
-		})
-	}
-}
-
-// TestWithTimeout_Valid verifies custom timeout configuration
-func TestWithTimeout_Valid(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-		WithTimeout(60*time.Second),
-	)
-
+func TestNewClient_WithBearerToken_Success(t *testing.T) {
+	client, err := NewClient(WithBearerToken("my-token"))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if client == nil {
-		t.Error("expected client to be non-nil")
+		t.Fatal("expected client to be non-nil")
 	}
 }
 
-// TestWithTimeout_Zero validates error for zero timeout
-func TestWithTimeout_Zero(t *testing.T) {
+func TestNewClient_NoAuth_Error(t *testing.T) {
+	_, err := NewClient()
+	if err == nil {
+		t.Fatal("expected error when no auth is provided")
+	}
+}
+
+func TestNewClient_BothAuth_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithBearerToken("token"),
+	)
+	if err == nil {
+		t.Fatal("expected error when both auth options are set")
+	}
+}
+
+func TestNewClient_QueryServiceInitialized(t *testing.T) {
+	client, err := NewClient(WithBasicAuth("neo4j", "password"))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client.Query == nil {
+		t.Error("expected Query service to be non-nil")
+	}
+}
+
+func TestWithDatabase_Valid(t *testing.T) {
 	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
+		WithBasicAuth("neo4j", "password"),
+		WithDatabase("mydb"),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
+func TestWithDatabase_Empty_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithDatabase(""),
+	)
+	if err == nil {
+		t.Fatal("expected error for empty database")
+	}
+}
+
+func TestWithTimeout_Valid(t *testing.T) {
+	client, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithTimeout(60*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
+func TestWithTimeout_Zero_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
 		WithTimeout(0),
 	)
-
 	if err == nil {
-		t.Error("expected error for zero timeout, got nil")
+		t.Fatal("expected error for zero timeout")
 	}
 	if err.Error() != "timeout must be greater than zero" {
-		t.Errorf("expected timeout error, got '%s'", err.Error())
-	}
-	if client != nil {
-		t.Error("expected client to be nil")
+		t.Errorf("expected timeout error message, got '%s'", err.Error())
 	}
 }
 
-// TestWithTimeout_Negative validates error for negative timeout
-func TestWithTimeout_Negative(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
+func TestWithTimeout_Negative_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
 		WithTimeout(-10*time.Second),
 	)
-
 	if err == nil {
-		t.Error("expected error for negative timeout, got nil")
-	}
-	if client != nil {
-		t.Error("expected client to be nil")
+		t.Fatal("expected error for negative timeout")
 	}
 }
 
-// TestWithLogger_Valid verifies custom logger configuration
+func TestWithMaxRetry_Valid(t *testing.T) {
+	client, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithMaxRetry(5),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
+func TestWithMaxRetry_Zero_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithMaxRetry(0),
+	)
+	if err == nil {
+		t.Fatal("expected error for zero max retry")
+	}
+}
+
 func TestWithLogger_Valid(t *testing.T) {
 	opts := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := slog.NewTextHandler(os.Stderr, opts)
 	customLogger := slog.New(handler)
 
 	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
+		WithBasicAuth("neo4j", "password"),
 		WithLogger(customLogger),
 	)
-
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if client.logger == nil {
-		t.Error("expected logger to be set")
-	}
-}
-
-// TestWithLogger_Nil validates error for nil logger
-func TestWithLogger_Nil(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-		WithLogger(nil),
-	)
-
-	if err == nil {
-		t.Error("expected error for nil logger, got nil")
-	}
-	if err.Error() != "logger cannot be nil" {
-		t.Errorf("expected logger error, got '%s'", err.Error())
-	}
-	if client != nil {
-		t.Error("expected client to be nil")
-	}
-}
-
-// TestWithBaseURL_Valid verifies custom base URL configuration
-func TestWithBaseURL_Valid(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-		WithBaseURL("https://api.staging.neo4j.io"),
-	)
-
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if client == nil {
-		t.Error("expected client to be non-nil")
+		t.Fatal("expected client to be non-nil")
 	}
 }
 
-// TestWithBaseURL_Empty validates error for empty base URL
-func TestWithBaseURL_Empty(t *testing.T) {
+func TestWithLogger_Nil_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithLogger(nil),
+	)
+	if err == nil {
+		t.Fatal("expected error for nil logger")
+	}
+	if err.Error() != "logger cannot be nil" {
+		t.Errorf("expected 'logger cannot be nil', got '%s'", err.Error())
+	}
+}
+
+func TestWithBaseURL_Valid(t *testing.T) {
 	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
+		WithBasicAuth("neo4j", "password"),
+		WithBaseURL("http://neo4j.example.com:7474"),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
+func TestWithBaseURL_Empty_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
 		WithBaseURL(""),
 	)
-
 	if err == nil {
-		t.Error("expected error for empty base URL, got nil")
+		t.Fatal("expected error for empty base URL")
 	}
 	if err.Error() != "base URL must not be empty" {
-		t.Errorf("expected base URL error, got '%s'", err.Error())
-	}
-	if client != nil {
-		t.Error("expected client to be nil")
+		t.Errorf("expected 'base URL must not be empty', got '%s'", err.Error())
 	}
 }
 
-// TestDefaultOptions verifies default configuration values.
-// Note: API version is intentionally not configurable — it is fixed to the
-// version this module targets and is not exposed via defaultOptions.
+func TestWithHTTPClient_Valid(t *testing.T) {
+	client, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithHTTPClient(&http.Client{}),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
+func TestWithHTTPClient_Nil_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithHTTPClient(nil),
+	)
+	if err == nil {
+		t.Fatal("expected error for nil HTTP client")
+	}
+}
+
+func TestWithUserAgent_Valid(t *testing.T) {
+	client, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithUserAgent("my-app/1.0"),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
+func TestWithUserAgent_Empty_Error(t *testing.T) {
+	_, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithUserAgent(""),
+	)
+	if err == nil {
+		t.Fatal("expected error for empty user agent")
+	}
+}
+
+func TestWithDefaultHeaders_Valid(t *testing.T) {
+	client, err := NewClient(
+		WithBasicAuth("neo4j", "password"),
+		WithDefaultHeaders(map[string]string{"X-Custom": "value"}),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client to be non-nil")
+	}
+}
+
 func TestDefaultOptions(t *testing.T) {
 	opts := defaultOptions()
 
-	if opts.config.baseURL != "https://api.neo4j.io" {
-		t.Errorf("expected default baseURL 'https://api.neo4j.io', got '%s'", opts.config.baseURL)
-	}
 	if opts.config.apiTimeout != 120*time.Second {
 		t.Errorf("expected default timeout 120s, got %v", opts.config.apiTimeout)
 	}
@@ -240,83 +269,23 @@ func TestDefaultOptions(t *testing.T) {
 	}
 }
 
-// TestAuraAPIVersion verifies the API version constant is set correctly
-func TestAuraAPIVersion(t *testing.T) {
-	if auraAPIVersion != "v1" {
-		t.Errorf("expected auraAPIVersion 'v1', got '%s'", auraAPIVersion)
+func TestClientVersion_IsNotEmpty(t *testing.T) {
+	if ClientVersion == "" {
+		t.Error("ClientVersion must not be empty")
 	}
 }
 
-// TestNewClient_MultipleOptions verifies combining multiple options
-func TestNewClient_MultipleOptions(t *testing.T) {
+func TestNewClient_MultipleOptions_Success(t *testing.T) {
 	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
+		WithBasicAuth("neo4j", "password"),
 		WithTimeout(90*time.Second),
-		WithBaseURL("https://api.staging.neo4j.io"),
-	)
-
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if client == nil {
-		t.Error("expected client to be non-nil")
-	}
-}
-
-// TestNewClient_DefaultValues verifies defaults when options not provided
-func TestNewClient_DefaultValues(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-	)
-
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if client == nil {
-		t.Error("expected client to be non-nil")
-	}
-}
-
-// TestWithCredentials verifies the convenience method
-func TestWithCredentials(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-	)
-
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if client == nil {
-		t.Error("expected client to be non-nil")
-	}
-}
-
-// TestWithMaxRetry_Valid verifies custom max retry configuration
-func TestWithMaxRetry_Valid(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
+		WithBaseURL("http://neo4j.example.com:7474"),
 		WithMaxRetry(5),
 	)
-
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if client == nil {
-		t.Error("expected client to be non-nil")
-	}
-}
-
-// TestWithMaxRetry_Zero validates error for zero max retry
-func TestWithMaxRetry_Zero(t *testing.T) {
-	client, err := NewClient(
-		WithCredentials("test-id", "test-secret"),
-		WithMaxRetry(0),
-	)
-
-	if err == nil {
-		t.Error("expected error for zero max retry, got nil")
-	}
-	if client != nil {
-		t.Error("expected client to be nil")
+		t.Fatal("expected client to be non-nil")
 	}
 }

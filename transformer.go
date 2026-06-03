@@ -22,6 +22,27 @@ type EagerResult struct {
 	Bookmarks     []string
 }
 
+// HasWarnings returns true if any WARNING severity notifications are present.
+func (e *EagerResult) HasWarnings() bool {
+	for _, n := range e.Notifications {
+		if n.Severity == decode.SeverityWarning {
+			return true
+		}
+	}
+	return false
+}
+
+// Warnings returns only the notifications with severity "WARNING".
+func (e *EagerResult) Warnings() []decode.Notification {
+	out := make([]decode.Notification, 0, len(e.Notifications))
+	for _, n := range e.Notifications {
+		if n.Severity == decode.SeverityWarning {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // String returns a human-readable summary of the result, useful for debugging.
 func (e *EagerResult) String() string {
 	var b strings.Builder

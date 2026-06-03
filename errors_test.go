@@ -3,8 +3,6 @@ package query
 import (
 	"fmt"
 	"testing"
-
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/api"
 )
 
 func TestIsNotFound(t *testing.T) {
@@ -15,22 +13,22 @@ func TestIsNotFound(t *testing.T) {
 	}{
 		{
 			name: "404 error",
-			err:  &api.Error{StatusCode: 404, Message: "not found"},
+			err:  &Error{StatusCode: 404, Message: "not found"},
 			want: true,
 		},
 		{
 			name: "wrapped 404 error",
-			err:  fmt.Errorf("operation failed: %w", &api.Error{StatusCode: 404, Message: "not found"}),
+			err:  fmt.Errorf("operation failed: %w", &Error{StatusCode: 404, Message: "not found"}),
 			want: true,
 		},
 		{
 			name: "401 error",
-			err:  &api.Error{StatusCode: 401, Message: "unauthorized"},
+			err:  &Error{StatusCode: 401, Message: "unauthorized"},
 			want: false,
 		},
 		{
 			name: "500 error",
-			err:  &api.Error{StatusCode: 500, Message: "internal server error"},
+			err:  &Error{StatusCode: 500, Message: "internal server error"},
 			want: false,
 		},
 		{

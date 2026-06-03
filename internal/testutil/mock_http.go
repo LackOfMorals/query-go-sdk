@@ -1,5 +1,5 @@
 // Package testutil provides mock implementations for use in tests across the
-// aura-client module. Nothing in this package should be imported by production
+// query-go-sdk module. Nothing in this package should be imported by production
 // code — it exists solely to share test helpers between internal packages
 // without putting mock types inside the packages they mock.
 package testutil
@@ -7,7 +7,7 @@ package testutil
 import (
 	"context"
 
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/httpclient"
+	"github.com/LackOfMorals/query-go-sdk/internal/httpclient"
 )
 
 // MockHTTPService is a test double for httpclient.HTTPService.

@@ -9,18 +9,17 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"strings"
 
 	"github.com/LackOfMorals/query-go-sdk/internal/httpclient"
 	"github.com/LackOfMorals/query-go-sdk/internal/utils"
 )
 
 func (b *BasicCredentials) Authorize() string {
-	return "Basic" + utils.Base64Encode(b.Username, b.Password)
+	return "Basic " + utils.Base64Encode(b.Username, b.Password)
 }
 
 func (s *StaticCredentials) Authorize() string {
-	return "Bearer" + s.Token
+	return "Bearer " + s.Token
 }
 
 // Error implements the error interface.
@@ -100,48 +99,37 @@ func (s *apiRequestService) Close() {
 }
 
 // Get performs an authenticated GET request.
-func (s *apiRequestService) Get(ctx context.Context, endpoint string) (*Response, error) {
-	return s.doAuthenticatedRequest(ctx, http.MethodGet, endpoint, "")
+func (s *apiRequestService) Get(ctx context.Context) (*Response, error) {
+	return s.doAuthenticatedRequest(ctx, http.MethodGet, "")
 }
 
 // Post performs an authenticated POST request.
-func (s *apiRequestService) Post(ctx context.Context, endpoint string, body string) (*Response, error) {
-	return s.doAuthenticatedRequest(ctx, http.MethodPost, endpoint, body)
+func (s *apiRequestService) Post(ctx context.Context, body string) (*Response, error) {
+	return s.doAuthenticatedRequest(ctx, http.MethodPost, body)
 }
 
 // Put performs an authenticated PUT request.
-func (s *apiRequestService) Put(ctx context.Context, endpoint string, body string) (*Response, error) {
-	return s.doAuthenticatedRequest(ctx, http.MethodPut, endpoint, body)
+func (s *apiRequestService) Put(ctx context.Context, body string) (*Response, error) {
+	return s.doAuthenticatedRequest(ctx, http.MethodPut, body)
 }
 
 // Patch performs an authenticated PATCH request.
-func (s *apiRequestService) Patch(ctx context.Context, endpoint string, body string) (*Response, error) {
-	return s.doAuthenticatedRequest(ctx, http.MethodPatch, endpoint, body)
+func (s *apiRequestService) Patch(ctx context.Context, body string) (*Response, error) {
+	return s.doAuthenticatedRequest(ctx, http.MethodPatch, body)
 }
 
 // Delete performs an authenticated DELETE request.
-func (s *apiRequestService) Delete(ctx context.Context, endpoint string) (*Response, error) {
-	return s.doAuthenticatedRequest(ctx, http.MethodDelete, endpoint, "")
+func (s *apiRequestService) Delete(ctx context.Context) (*Response, error) {
+	return s.doAuthenticatedRequest(ctx, http.MethodDelete, "")
 }
 
 // doAuthenticatedRequest handles the common pattern of making an authenticated
 // API request. It trusts the deadline already set on ctx by the calling service
 // layer — no additional timeout is applied here.
-func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, endpoint, body string) (*Response, error) {
+func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, body string) (*Response, error) {
 	if err := ctx.Err(); err != nil {
 		s.logger.ErrorContext(ctx, "context already cancelled before function", slog.String("error", err.Error()))
 		return nil, err
-	}
-
-	// Handle both relative endpoints (the common case) and absolute URLs
-	// (used by the Prometheus service). For relative endpoints, trim any
-	// stray leading/trailing slashes before joining so a misplaced "/"
-	// never produces a double-slash in the final URL.
-	var fullURL string
-	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
-		fullURL = endpoint
-	} else {
-		fullURL = strings.TrimRight(s.endpointBase, "/") + "/" + strings.TrimLeft(endpoint, "/")
 	}
 
 	// Start with any caller-supplied default headers, then overwrite with the
@@ -151,9 +139,14 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 	headers["Content-Type"] = "application/json"
 	headers["User-Agent"] = s.userAgent
 	headers["Authorization"] = s.authHeader.Authorize()
+
+	fullURL := s.baseURL + "/db/neo4j/query/v2"
+
 	s.logger.DebugContext(ctx, "making authenticated API request",
+		slog.String("header content", headers["Content-Type"]),
+		slog.String("header auth", headers["Authorization"]),
 		slog.String("method", method),
-		slog.String("endpoint", fullURL),
+		slog.String("body", body),
 	)
 
 	var resp *httpclient.HTTPResponse

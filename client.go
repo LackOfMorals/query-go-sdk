@@ -114,10 +114,6 @@ func defaultOptions() *options {
 	opts := &slog.HandlerOptions{Level: slog.LevelWarn}
 	handler := slog.NewTextHandler(os.Stderr, opts)
 
-	var basicAuth api.Credentials
-
-	basicAuth = &api.BasicCredentials{Username: "neo4j", Password: "password"}
-
 	return &options{
 		config: config{
 			baseURL:       "http://localhost:7474/db/neo4j/query/v2",
@@ -125,7 +121,6 @@ func defaultOptions() *options {
 			apiRetryMax:   3,
 			clientVersion: ClientVersion,
 			userAgent:     "query-go-sdk/" + ClientVersion,
-			authHeader:    basicAuth,
 		},
 		logger: slog.New(handler),
 	}
@@ -351,5 +346,9 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 		slog.String("apiVersion", ClientVersion),
 	)
 
+	service.logger.Debug("Query API client config",
+		slog.String("base url", o.config.baseURL),
+		slog.String("authheader", o.config.authHeader.Authorize()),
+	)
 	return service, nil
 }

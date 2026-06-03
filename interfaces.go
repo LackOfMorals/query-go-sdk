@@ -5,8 +5,8 @@ import "context"
 
 // QueryService defines operations for using the Query API
 type QueryService interface {
-	// List returns all tenants accessible to the authenticated user
-	Query(ctx context.Context, qry string, qryParams map[string]string) (*QueryResponse, error)
+	// Runs a Cypher statement
+	Execute(ctx context.Context, qry string, qryParams map[string]string) (*QueryResponse, error)
 }
 
 // Compile-time interface compliance checks

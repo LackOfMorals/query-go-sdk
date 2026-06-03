@@ -36,7 +36,7 @@ func main() {
 	// Each call gets its own context so it can be individually cancelled or traced.
 	ctx := context.Background()
 
-	response, err := client.Query.Query(ctx, cypherQry, cypherParams)
+	response, err := client.Query.Execute(ctx, cypherQry, cypherParams)
 	if err != nil {
 		log.Fatalf("Failed to query: %v", err)
 	}

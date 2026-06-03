@@ -33,14 +33,14 @@ type queryService struct {
 	logger  *slog.Logger
 }
 
-// List returns all instances accessible to the authenticated user.
-func (q *queryService) Query(ctx context.Context, qry string, qryParams map[string]string) (*QueryResponse, error) {
+// Executues a Cypher statement
+func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[string]string) (*QueryResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 
 	q.logger.DebugContext(ctx, "running query")
 
-	resp, err := q.api.Get(ctx, "instances")
+	resp, err := q.api.Post(ctx, `{"statement": "MATCH (p:Person)-[a:ACTED_IN]-(m:Movie {title:'The Matrix'}) RETURN p.name, m.title, a.role"}"`)
 	if err != nil {
 		q.logger.ErrorContext(ctx, "failed to query", slog.String("error", err.Error()))
 		return nil, err

@@ -93,11 +93,11 @@ type tokenResponse struct {
 // RequestService defines the interface for making authenticated API requests.
 // This is the middle layer that handles authentication and common API patterns.
 type RequestService interface {
-	Get(ctx context.Context, endpoint string) (*Response, error)
-	Post(ctx context.Context, endpoint string, body string) (*Response, error)
-	Put(ctx context.Context, endpoint string, body string) (*Response, error)
-	Patch(ctx context.Context, endpoint string, body string) (*Response, error)
-	Delete(ctx context.Context, endpoint string) (*Response, error)
+	Get(ctx context.Context) (*Response, error)
+	Post(ctx context.Context, body string) (*Response, error)
+	Put(ctx context.Context, body string) (*Response, error)
+	Patch(ctx context.Context, body string) (*Response, error)
+	Delete(ctx context.Context) (*Response, error)
 	// Close releases idle connections held by the underlying HTTP transport.
 	// It should be called (typically via defer) when the client is no longer needed.
 	Close()

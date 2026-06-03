@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/httpclient"
+	"github.com/LackOfMorals/query-go-sdk/internal/httpclient"
 )
 
-// Response represents a response from the Aura API.
+// Response represents a response from the Query API.
 type Response struct {
 	StatusCode int
 	Body       []byte
 }
 
-// Error represents an error response from the Aura API.
+// Error represents an error response from the Query API.
 type Error struct {
 	StatusCode int           `json:"status_code"`
 	Message    string        `json:"message"`
@@ -30,10 +30,25 @@ type ErrorDetail struct {
 	Field   string `json:"field,omitempty"`
 }
 
+// Credentials produces the Authorization header value on demand.
+type Credentials interface {
+	Authorize() (headerValue string)
+}
+
+// basicCredentials uses username+password to set Basic auth on every request.
+type BasicCredentials struct {
+	Username string
+	Password string
+}
+
+// staticCredentials holds a pre-supplied bearer token.
+type StaticCredentials struct {
+	Token string
+}
+
 // Config holds configuration for the API service.
 type Config struct {
-	Username       string
-	Password       string
+	AuthHeader     Credentials
 	BaseURL        string
 	APIVersion     string
 	Timeout        time.Duration
@@ -46,7 +61,7 @@ type Config struct {
 // apiRequestService is the concrete implementation of RequestService.
 type apiRequestService struct {
 	httpClient     httpclient.HTTPService
-	authMgr        *authManager
+	authHeader     Credentials
 	baseURL        string
 	endpointBase   string
 	userAgent      string

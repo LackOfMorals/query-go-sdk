@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/api"
+	"github.com/LackOfMorals/query-go-sdk/internal/api"
 )
 
 // ============================================================================
@@ -88,8 +88,7 @@ type config struct {
 	baseURL        string            // the base URL of neo4j server
 	apiTimeout     time.Duration     // how long to wait for a response from an Aura API endpoint
 	apiRetryMax    int               // the number of retries to attempt
-	username       string            // username
-	password       string            // password
+	authHeader     api.Credentials   // The auth header value to use
 	database       string            // database
 	httpClient     *http.Client      // optional custom HTTP client (injected transport)
 	userAgent      string            // optional User-Agent override
@@ -115,30 +114,39 @@ func defaultOptions() *options {
 	opts := &slog.HandlerOptions{Level: slog.LevelWarn}
 	handler := slog.NewTextHandler(os.Stderr, opts)
 
+	var basicAuth api.Credentials
+
+	basicAuth = &api.BasicCredentials{Username: "neo4j", Password: "password"}
+
 	return &options{
 		config: config{
-			baseURL:       "https://api.neo4j.io",
+			baseURL:       "http://localhost:7474/db/neo4j/query/v2",
 			apiTimeout:    120 * time.Second,
 			apiRetryMax:   3,
 			clientVersion: ClientVersion,
-			userAgent:     "aura-go-sdk/" + ClientVersion,
+			userAgent:     "query-go-sdk/" + ClientVersion,
+			authHeader:    basicAuth,
 		},
 		logger: slog.New(handler),
 	}
 }
 
-// WithBasicCredentials
-func WithBasicCredentials(username string, password string) Option {
+func WithBasicAuth(username, password string) Option {
 	return func(o *options) error {
-		// check username / password are not emtpy
-		if username == "" {
-			return errors.New("username must not be emtpy ")
+		if o.config.authHeader != nil {
+			return errors.New("auth already set: WithBasicAuth and WithBearerToken are mutually exclusive")
 		}
-		if password == "" {
-			return errors.New("password must not be emtpy ")
+		o.config.authHeader = &api.BasicCredentials{Username: username, Password: password}
+		return nil
+	}
+}
+
+func WithBearerToken(token string) Option {
+	return func(o *options) error {
+		if o.config.authHeader != nil {
+			return errors.New("auth already set: WithBasicAuth and WithBearerToken are mutually exclusive")
 		}
-		o.config.username = username
-		o.config.password = password
+		o.config.authHeader = &api.StaticCredentials{Token: token}
 		return nil
 	}
 }
@@ -285,14 +293,11 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 		}
 	}
 
-	if o.config.username == "" {
-		o.logger.Error("validation failed", slog.String("reason", "username must not be empty"))
+	if o.config.authHeader == nil {
+		o.logger.Error("validation failed", slog.String("reason", "username/ password or Token must be given"))
 		return nil, errors.New("username must not be empty")
 	}
-	if o.config.password == "" {
-		o.logger.Error("validation failed", slog.String("reason", "password must not be empty"))
-		return nil, errors.New("password must not be empty")
-	}
+
 	if o.config.baseURL == "" {
 		o.logger.Error("validation failed", slog.String("reason", "base URL must not be empty"))
 		return nil, errors.New("base URL must not be empty")
@@ -317,8 +322,7 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	)
 
 	apiSvc := api.NewRequestService(api.Config{
-		Username:       o.config.username,
-		Password:       o.config.password,
+		AuthHeader:     o.config.authHeader,
 		BaseURL:        o.config.baseURL,
 		APIVersion:     ClientVersion,
 		Timeout:        o.config.apiTimeout,

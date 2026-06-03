@@ -3,7 +3,7 @@ package query
 import (
 	"errors"
 
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/api"
+	"github.com/LackOfMorals/query-go-sdk/internal/api"
 )
 
 // Error represents an error response from the Aura API.

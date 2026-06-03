@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/api"
+	"github.com/LackOfMorals/query-go-sdk/internal/api"
 )
 
 // ============================================================================
@@ -38,7 +38,7 @@ func (q *queryService) Query(ctx context.Context, qry string, qryParams map[stri
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 
-	q.logger.DebugContext(ctx, "listing instances")
+	q.logger.DebugContext(ctx, "running query")
 
 	resp, err := q.api.Get(ctx, "instances")
 	if err != nil {
@@ -48,10 +48,10 @@ func (q *queryService) Query(ctx context.Context, qry string, qryParams map[stri
 
 	var result QueryResponse
 	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		q.logger.ErrorContext(ctx, "failed to unmarshal instances response", slog.String("error", err.Error()))
+		q.logger.ErrorContext(ctx, "failed to unmarshal query response", slog.String("error", err.Error()))
 		return nil, err
 	}
 
-	q.logger.DebugContext(ctx, "instances listed successfully", slog.Int("count", len(result.Data)))
+	q.logger.DebugContext(ctx, "query ran successfully", slog.Int("count", len(result.Data)))
 	return &result, nil
 }

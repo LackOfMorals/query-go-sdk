@@ -9,13 +9,19 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/httpclient"
-	"github.com/neo4j-contrib/aura-go-sdk/v2/internal/utils"
+	"github.com/LackOfMorals/query-go-sdk/internal/httpclient"
+	"github.com/LackOfMorals/query-go-sdk/internal/utils"
 )
+
+func (b *BasicCredentials) Authorize() string {
+	return "Basic" + utils.Base64Encode(b.Username, b.Password)
+}
+
+func (s *StaticCredentials) Authorize() string {
+	return "Bearer" + s.Token
+}
 
 // Error implements the error interface.
 func (e *Error) Error() string {
@@ -76,16 +82,12 @@ func NewRequestService(cfg Config, logger *slog.Logger) RequestService {
 	}
 
 	return &apiRequestService{
-		httpClient: httpSvc,
-		authMgr: &authManager{
-			username: cfg.Username,
-			password: cfg.Password,
-			logger:   logger,
-		},
+		httpClient:     httpSvc,
 		baseURL:        cfg.BaseURL,
 		endpointBase:   cfg.BaseURL + "/" + cfg.APIVersion,
 		userAgent:      userAgent,
 		defaultHeaders: cfg.DefaultHeaders,
+		authHeader:     cfg.AuthHeader,
 		logger:         logger,
 	}
 }
@@ -142,26 +144,21 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 		fullURL = strings.TrimRight(s.endpointBase, "/") + "/" + strings.TrimLeft(endpoint, "/")
 	}
 
-	tokenType, token, err := s.authMgr.ensureValidToken(ctx, s.baseURL, s.httpClient)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to obtain authentication token", slog.String("error", err.Error()))
-		return nil, err
-	}
-
 	// Start with any caller-supplied default headers, then overwrite with the
 	// required protocol headers so they can never be replaced.
 	headers := make(map[string]string, len(s.defaultHeaders)+3)
 	maps.Copy(headers, s.defaultHeaders)
 	headers["Content-Type"] = "application/json"
 	headers["User-Agent"] = s.userAgent
-	headers["Authorization"] = tokenType + " " + token
-
+	headers["Authorization"] = s.authHeader.Authorize()
 	s.logger.DebugContext(ctx, "making authenticated API request",
 		slog.String("method", method),
 		slog.String("endpoint", fullURL),
 	)
 
 	var resp *httpclient.HTTPResponse
+
+	var err error
 
 	switch method {
 	case http.MethodGet:
@@ -208,82 +205,6 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 		StatusCode: resp.StatusCode,
 		Body:       resp.Body,
 	}, nil
-}
-
-// ensureValidToken gets or refreshes the authentication token and returns it
-// to the caller. Token fields are always read while the mutex is held to
-// prevent data races.
-func (am *authManager) ensureValidToken(ctx context.Context, baseURL string, httpSvc httpclient.HTTPService) (tokenType, token string, err error) {
-	am.mu.RLock()
-	if len(am.token) > 0 && time.Now().Unix() <= am.expiresAt-60 {
-		t, tt := am.token, am.tokenType
-		am.mu.RUnlock()
-		return tt, t, nil
-	}
-	am.mu.RUnlock()
-
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
-	// Double-check after acquiring the write lock — another goroutine may have
-	// refreshed the token while we were waiting.
-	if len(am.token) > 0 && time.Now().Unix() <= am.expiresAt-60 {
-		return am.tokenType, am.token, nil
-	}
-
-	am.logger.DebugContext(ctx, "obtaining new authentication token")
-
-	auth := "Basic " + utils.Base64Encode(am.clientID, am.clientSecret)
-
-	headers := map[string]string{
-		"Content-Type":  "application/x-www-form-urlencoded",
-		"Authorization": auth,
-	}
-
-	body := url.Values{}
-	body.Set("grant_type", "client_credentials")
-
-	resp, err := httpSvc.Post(ctx, baseURL+"/oauth/token", headers, body.Encode())
-	if err != nil {
-		am.logger.DebugContext(ctx, "failed to obtain token", slog.String("error", err.Error()))
-		return "", "", err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		apiErr := parseError(resp.Body, resp.StatusCode)
-		am.logger.DebugContext(ctx, "token request failed",
-			slog.Int("statusCode", resp.StatusCode),
-			slog.String("error", apiErr.Message),
-		)
-		return "", "", apiErr
-	}
-
-	var tokenResp tokenResponse
-	if err := json.Unmarshal(resp.Body, &tokenResp); err != nil {
-		am.logger.DebugContext(ctx, "failed to parse token response", slog.String("error", err.Error()))
-		return "", "", fmt.Errorf("failed to parse token response: %w", err)
-	}
-
-	// Check that we have a bearer token as this is the only supported token type
-	// returned by the Aura API.  Anything else could indicate interference
-	if tokenResp.TokenType != "Bearer" {
-		return "", "", fmt.Errorf("token type is not valid: %s", tokenResp.TokenType)
-	}
-
-	// Check tokenResp.ExpiresIn
-	// A value of 0 or negative causes the SDK to re-fetch a token on every single API request (token endpoint flood).
-	// A very large value keeps a revoked token in use indefinitely.
-	if tokenResp.ExpiresIn <= 0 || tokenResp.ExpiresIn > 86400*365 {
-		return "", "", fmt.Errorf("invalid expires_in value: %d", tokenResp.ExpiresIn)
-	}
-
-	am.token = tokenResp.AccessToken
-	am.tokenType = tokenResp.TokenType
-	am.expiresAt = time.Now().Unix() + tokenResp.ExpiresIn
-
-	am.logger.DebugContext(ctx, "token obtained successfully", slog.Int64("expiresIn", tokenResp.ExpiresIn))
-
-	return am.tokenType, am.token, nil
 }
 
 // parseError attempts to parse an error response body from the API.

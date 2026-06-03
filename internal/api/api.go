@@ -137,6 +137,7 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 	headers := make(map[string]string, len(s.defaultHeaders)+3)
 	maps.Copy(headers, s.defaultHeaders)
 	headers["Content-Type"] = "application/json"
+	headers["Accept"] = "application/vnd.neo4j.query"
 	headers["User-Agent"] = s.userAgent
 	headers["Authorization"] = s.authHeader.Authorize()
 

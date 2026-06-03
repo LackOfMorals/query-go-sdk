@@ -2,28 +2,15 @@ package query
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"time"
 
 	"github.com/LackOfMorals/query-go-sdk/internal/api"
+	"github.com/LackOfMorals/query-go-sdk/internal/decode"
 )
 
 // ============================================================================
 // Types
-// ============================================================================
-
-// ListInstancesResponse contains a list of instances in a tenant.
-type QueryResponse struct {
-	Data []QueryData `json:"data"`
-}
-
-// QueryData holds the summary fields returned for each instance in a list response.
-type QueryData struct {
-}
-
-// ============================================================================
-// Service
 // ============================================================================
 
 // instanceService handles instance operations.
@@ -33,8 +20,12 @@ type queryService struct {
 	logger  *slog.Logger
 }
 
+// ============================================================================
+// Service
+// ============================================================================
+
 // Executues a Cypher statement
-func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[string]string) (*QueryResponse, error) {
+func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[string]string) (*decode.Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 
@@ -46,12 +37,11 @@ func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[st
 		return nil, err
 	}
 
-	var result QueryResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		q.logger.ErrorContext(ctx, "failed to unmarshal query response", slog.String("error", err.Error()))
+	result, err := decode.DecodeResponse(resp.Body)
+	if err != nil {
+		q.logger.ErrorContext(ctx, "failed to decode response", slog.String("error", err.Error()))
 		return nil, err
 	}
 
-	q.logger.DebugContext(ctx, "query ran successfully", slog.Int("count", len(result.Data)))
-	return &result, nil
+	return result, nil
 }

@@ -1,0 +1,10 @@
+.DS_Store
+internal/utils/env.go
+internal/httpclient/coverage.out
+.env
+example/
+
+coverage.out
+.plans/
+.vscode/
+.kiro/

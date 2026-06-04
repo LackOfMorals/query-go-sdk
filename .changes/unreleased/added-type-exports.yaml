@@ -1,2 +1,0 @@
-kind: Added
-body: Re-export internal decode types (Response, Node, Relationship, Path, Notification, PlanOperator, Duration, Point) so callers can write custom ResultTransformer implementations

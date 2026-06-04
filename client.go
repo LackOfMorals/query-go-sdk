@@ -183,8 +183,8 @@ func WithMaxRetry(maxRetry int) Option {
 	}
 }
 
-// WithMaxResponse sets the maximum size for  response.  Default is 10mb
-func WithMaxResponse(maxResponse int) Option {
+// WithMaxResponseSize sets the maximum size for  response.  Default is 10mb
+func WithMaxResponseSize(maxResponse int) Option {
 	return func(o *options) error {
 		if maxResponse <= 0 {
 			return errors.New("max response size must be greater than zero")

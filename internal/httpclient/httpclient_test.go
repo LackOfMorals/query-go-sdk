@@ -21,7 +21,7 @@ func testLogger() *slog.Logger {
 // newTestService returns an HTTPService with a short timeout, no retries, and
 // a warn-level logger — suitable for fast unit tests.
 func newTestService() HTTPService {
-	return NewHTTPService(5*time.Second, 0, testLogger(), nil)
+	return NewHTTPService(5*time.Second, 0, 10*1024*1024, testLogger(), nil)
 }
 
 // ─── GET ──────────────────────────────────────────────────────────────────────

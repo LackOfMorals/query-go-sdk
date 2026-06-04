@@ -1,0 +1,2 @@
+kind: Fixed
+body: Responses exceeding maxResponseSize now return an explicit error instead of silently truncating the body; configurable via WithMaxResponseSize

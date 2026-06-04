@@ -1,0 +1,2 @@
+kind: Fixed
+body: WithDatabase option is now wired through to the request URL (/db/<database>/query/v2); was previously accepted but silently ignored

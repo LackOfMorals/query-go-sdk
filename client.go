@@ -1,24 +1,33 @@
-// Package query provides a Go client library for the Neo4j Query API.
-// and is based on the aura-go-sdk
+// Package query provides a Go client for the Neo4j Query API.
 //
-// The client supports all major Query API operations including
-// - query with or without parameters
-// - use of plain JSON  or JSON with types formats
-// - explicit transactions
+// Execute Cypher queries against a Neo4j database over plain HTTP using the
+// typed JSON wire format. No Bolt protocol, no binary dependencies.
 //
-// Example usage:
+// Basic usage:
 //
 //	client, err := query.NewClient(
-//	    query.WithBasicCredentials("username", "password"),
-//	    query.WithURL("http://localhost:7474"),
-//	    query.WithDB("neo4j"),
-//	    query.WithFormat("JSON"),
+//	    query.WithBasicAuth("neo4j", "password"),
+//	    query.WithBaseURL("http://localhost:7474"),
 //	)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//	defer client.Close()
 //
-// result := client.query("MATCH (n) RETURN * LIMIT 1","")
+//	result, err := query.WithTransformer(
+//	    client.Query,
+//	    context.Background(),
+//	    "MATCH (n:Person) RETURN n.name AS name LIMIT 10",
+//	    nil,
+//	    query.EagerResultTransformer,
+//	)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	for _, rec := range result.Records {
+//	    name, _ := rec.GetString("name")
+//	    fmt.Println(name)
+//	}
 
 package query
 
@@ -69,7 +78,7 @@ func init() {
 // Client types
 // ============================================================================
 
-// QueryAPIClient is the main client for interacting with the Neo4j Aura API.
+// QueryAPIClient is the main client for the Neo4j Query API.
 //
 //nolint:revive // QueryAPIClient is intentional: the package is named query and the type name is established in v1.
 type QueryAPIClient struct {
@@ -83,7 +92,7 @@ type QueryAPIClient struct {
 // config holds internal configuration (unexported).
 type config struct {
 	baseURL         string            // the base URL of neo4j server
-	apiTimeout      time.Duration     // how long to wait for a response from an Aura API endpoint
+	apiTimeout      time.Duration     // how long to wait for a response from the Query API endpoint
 	apiRetryMax     int               // the number of retries to attempt
 	authHeader      api.Credentials   // The auth header value to use
 	database        string            // database
@@ -208,11 +217,8 @@ func WithBaseURL(baseURL string) Option {
 		if baseURL == "" {
 			return errors.New("base URL must not be empty")
 		}
-		/* Might enforce this for Aura DBs if we can figure out the URL.
-		if !strings.HasPrefix(baseURL, "https://") {
-			return errors.New("base URL must use HTTPS to protect credentials in transit")
-		}
-		*/
+		// TODO: enforce HTTPS for remote servers to protect credentials in transit.
+		// WithInsecureBaseURL should be added as an explicit escape hatch for local/test use.
 
 		o.config.baseURL = baseURL
 		return nil
@@ -360,9 +366,7 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 		return nil, errors.New("API timeout must be greater than zero")
 	}
 
-	// Technically the user agent could be empty. Our usage analysis relies on this being set so
-	// we don't allow it to be empty
-	// Custom userAgent maybe withdrawn.
+	// User-Agent is required for usage analysis. WithUserAgent can override the default.
 	if o.config.userAgent == "" {
 		o.logger.Error("validation failed", slog.String("reason", "User agent cannot be empty"))
 		return nil, errors.New("user agent cannot be empty")

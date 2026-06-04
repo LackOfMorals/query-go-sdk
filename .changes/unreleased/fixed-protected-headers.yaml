@@ -1,0 +1,2 @@
+kind: Fixed
+body: WithDefaultHeaders now correctly protects Authorization, Content-Type, Accept, and User-Agent from being overridden; keys were mixed-case and never matched the lowercase lookup

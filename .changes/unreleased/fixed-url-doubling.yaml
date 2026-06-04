@@ -1,0 +1,2 @@
+kind: Fixed
+body: Default baseURL no longer includes the query path suffix; was producing a doubled /db/neo4j/query/v2/db/neo4j/query/v2 URL for clients using the default configuration

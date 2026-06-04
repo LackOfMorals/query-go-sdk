@@ -211,15 +211,15 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithBaseURL overrides the default URL.
+// WithBaseURL overrides the default base URL of the Neo4j server.
+// The SDK does not enforce HTTPS — it is the caller's responsibility to use
+// an appropriate scheme for their deployment. Use HTTPS for any server that
+// is not on a trusted loopback interface.
 func WithBaseURL(baseURL string) Option {
 	return func(o *options) error {
 		if baseURL == "" {
 			return errors.New("base URL must not be empty")
 		}
-		// TODO: enforce HTTPS for remote servers to protect credentials in transit.
-		// WithInsecureBaseURL should be added as an explicit escape hatch for local/test use.
-
 		o.config.baseURL = baseURL
 		return nil
 	}

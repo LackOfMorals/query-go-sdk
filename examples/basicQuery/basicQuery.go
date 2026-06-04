@@ -35,6 +35,7 @@ func main() {
 		query.WithTimeout(120*time.Second),
 		query.WithLogger(customLogger),
 		query.WithBasicAuth(username, password),
+		query.WithMaxResponseSize(10*1024*1024), // 10 mb max size
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)

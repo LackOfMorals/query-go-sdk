@@ -388,10 +388,7 @@ func decodeVector(raw json.RawMessage) (Vector, error) {
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return Vector{}, fmt.Errorf("decode Vector: %w", err)
 	}
-	return Vector{
-		CoordinatesType: w.CoordinatesType,
-		Coordinates:     w.Coordinates,
-	}, nil
+	return Vector(w), nil
 }
 
 func decodeProperties(raw map[string]json.RawMessage) (map[string]any, error) {

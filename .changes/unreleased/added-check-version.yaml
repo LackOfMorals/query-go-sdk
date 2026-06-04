@@ -1,0 +1,2 @@
+kind: Added
+body: CheckVersion method validates the connected Neo4j server is running 2026.04.0 or newer; returns *VersionError with the required and actual versions

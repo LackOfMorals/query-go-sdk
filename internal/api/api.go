@@ -1,5 +1,5 @@
-// Package api implements the authenticated HTTP request layer for the Aura API.
-// It handles OAuth token acquisition and refresh, URL construction, and error parsing.
+// Package api implements the authenticated HTTP request layer for the Neo4j Query API.
+// It handles URL construction, authentication, and error parsing.
 package api
 
 import (
@@ -73,17 +73,19 @@ func (e *Error) IsBadRequest() bool {
 // retryable wrapper, letting callers inject custom transports (mTLS, proxies,
 // testing). When nil a default client with production-suitable settings is used.
 func NewRequestService(cfg Config, logger *slog.Logger) RequestService {
-	httpSvc := httpclient.NewHTTPService(cfg.Timeout, cfg.MaxRetry, logger, cfg.HTTPClient)
+	httpSvc := httpclient.NewHTTPService(cfg.Timeout, cfg.MaxRetry, cfg.MaxResponseSize, logger, cfg.HTTPClient)
 
 	userAgent := cfg.UserAgent
+	// Submit our own user agent when none is given
 	if userAgent == "" {
-		userAgent = "query-go-client"
+		userAgent = fmt.Sprintf("%s/%s", "query-go-client", cfg.ClientVersion)
 	}
 
 	return &apiRequestService{
 		httpClient:     httpSvc,
 		baseURL:        cfg.BaseURL,
-		endpointBase:   cfg.BaseURL + "/" + cfg.APIVersion,
+		database:       cfg.Database,
+		clientVersion:  cfg.ClientVersion,
 		userAgent:      userAgent,
 		defaultHeaders: cfg.DefaultHeaders,
 		authHeader:     cfg.AuthHeader,
@@ -96,6 +98,51 @@ func NewRequestService(cfg Config, logger *slog.Logger) RequestService {
 // when the RequestService is no longer needed.
 func (s *apiRequestService) Close() {
 	s.httpClient.Close()
+}
+
+// Discover calls the Neo4j discovery endpoint (GET /) and returns server
+// metadata. The same Authorization and User-Agent headers are sent as for
+// regular query requests.
+func (s *apiRequestService) Discover(ctx context.Context) (*DiscoveryResponse, error) {
+	if err := ctx.Err(); err != nil {
+		s.logger.ErrorContext(ctx, "context already cancelled before discover", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"User-Agent":    s.userAgent,
+		"Authorization": s.authHeader.Authorize(),
+	}
+
+	url := s.baseURL + "/"
+
+	s.logger.DebugContext(ctx, "calling discovery endpoint", slog.String("url", url))
+
+	resp, err := s.httpClient.Get(ctx, url, headers)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "discovery request failed",
+			slog.String("url", url),
+			slog.String("error", err.Error()),
+		)
+		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(resp.Body, resp.StatusCode)
+	}
+
+	var discovery DiscoveryResponse
+	if err := json.Unmarshal(resp.Body, &discovery); err != nil {
+		return nil, fmt.Errorf("discover: unmarshal response: %w", err)
+	}
+
+	s.logger.DebugContext(ctx, "discovery response",
+		slog.String("neo4j_version", discovery.Neo4jVersion),
+		slog.String("neo4j_edition", discovery.Neo4jEdition),
+	)
+
+	return &discovery, nil
 }
 
 // Get performs an authenticated GET request.
@@ -141,9 +188,10 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 	headers["User-Agent"] = s.userAgent
 	headers["Authorization"] = s.authHeader.Authorize()
 
-	fullURL := s.baseURL + "/db/neo4j/query/v2"
+	fullURL := fmt.Sprintf("%s/db/%s/query/v2", s.baseURL, s.database)
 
 	s.logger.DebugContext(ctx, "making authenticated API request",
+		slog.String("URL", fullURL),
 		slog.String("header content", headers["Content-Type"]),
 		slog.String("header auth", headers["Authorization"]),
 		slog.String("header accept", headers["Accept"]),

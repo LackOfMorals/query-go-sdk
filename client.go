@@ -1,29 +1,40 @@
-// Package query provides a Go client library for the Neo4j Query API.
-// and is based on the aura-go-sdk
+// Package query provides a Go client for the Neo4j Query API.
 //
-// The client supports all major Query API operations including
-// - query with or without parameters
-// - use of plain JSON  or JSON with types formats
-// - explicit transactions
+// Execute Cypher queries against a Neo4j database over plain HTTP using the
+// typed JSON wire format. No Bolt protocol, no binary dependencies.
 //
-// Example usage:
+// Basic usage:
 //
 //	client, err := query.NewClient(
-//	    query.WithBasicCredentials("username", "password"),
-//	    query.WithURL("http://localhost:7474"),
-//	    query.WithDB("neo4j"),
-//	    query.WithFormat("JSON"),
+//	    query.WithBasicAuth("neo4j", "password"),
+//	    query.WithBaseURL("http://localhost:7474"),
 //	)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//	defer client.Close()
 //
-// result := client.query("MATCH (n) RETURN * LIMIT 1","")
+//	result, err := query.WithTransformer(
+//	    client.Query,
+//	    context.Background(),
+//	    "MATCH (n:Person) RETURN n.name AS name LIMIT 10",
+//	    nil,
+//	    query.EagerResultTransformer,
+//	)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	for _, rec := range result.Records {
+//	    name, _ := rec.GetString("name")
+//	    fmt.Println(name)
+//	}
 
 package query
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,17 +43,12 @@ import (
 	"time"
 
 	"github.com/LackOfMorals/query-go-sdk/internal/api"
+	"github.com/LackOfMorals/query-go-sdk/internal/utils"
 )
 
 // ============================================================================
 // Constants and version
 // ============================================================================
-
-// neo4jVersion is the min version of Neo4jthis client targets.
-// Query API has evolved over time and , whilst avoiding breaking changes, there
-// are differences such that a min version is necessary
-
-const neo4jVersion = ""
 
 // clientVersionFallback is embedded in the User-Agent when the real module version cannot
 // be determined (local builds, go test, go run). It is intentionally kept as "development"
@@ -72,9 +78,9 @@ func init() {
 // Client types
 // ============================================================================
 
-// QueryAPIClient is the main client for interacting with the Neo4j Aura API.
+// QueryAPIClient is the main client for the Neo4j Query API.
 //
-//nolint:revive // QueryAPIClient is intentional: the package is named quert and the type name is established in v1.
+//nolint:revive // QueryAPIClient is intentional: the package is named query and the type name is established in v1.
 type QueryAPIClient struct {
 	api    api.RequestService // Handles authenticated API requests
 	logger *slog.Logger       // Structured logger
@@ -85,15 +91,16 @@ type QueryAPIClient struct {
 
 // config holds internal configuration (unexported).
 type config struct {
-	baseURL        string            // the base URL of neo4j server
-	apiTimeout     time.Duration     // how long to wait for a response from an Aura API endpoint
-	apiRetryMax    int               // the number of retries to attempt
-	authHeader     api.Credentials   // The auth header value to use
-	database       string            // database
-	httpClient     *http.Client      // optional custom HTTP client (injected transport)
-	userAgent      string            // optional User-Agent override
-	defaultHeaders map[string]string // optional headers added to every API request
-	clientVersion  string            // the version of this query client
+	baseURL         string            // the base URL of neo4j server
+	apiTimeout      time.Duration     // how long to wait for a response from the Query API endpoint
+	apiRetryMax     int               // the number of retries to attempt
+	authHeader      api.Credentials   // The auth header value to use
+	database        string            // database
+	httpClient      *http.Client      // optional custom HTTP client (injected transport)
+	userAgent       string            // optional User-Agent override
+	defaultHeaders  map[string]string // optional headers added to every API request
+	maxResponseSize int               // optional max response size in bytes
+	clientVersion   string            // the version of this query client
 }
 
 // Option is a functional option for configuring the AuraAPIClient.
@@ -116,11 +123,13 @@ func defaultOptions() *options {
 
 	return &options{
 		config: config{
-			baseURL:       "http://localhost:7474/db/neo4j/query/v2",
-			apiTimeout:    120 * time.Second,
-			apiRetryMax:   3,
-			clientVersion: ClientVersion,
-			userAgent:     "query-go-sdk/" + ClientVersion,
+			baseURL:         "http://localhost:7474",
+			database:        "neo4j",
+			apiTimeout:      120 * time.Second,
+			apiRetryMax:     3,
+			clientVersion:   ClientVersion,
+			userAgent:       "query-go-sdk/" + ClientVersion,
+			maxResponseSize: 10 * 1024 * 1024, // This is 10mb
 		},
 		logger: slog.New(handler),
 	}
@@ -149,9 +158,9 @@ func WithBearerToken(token string) Option {
 // WithDatabase
 func WithDatabase(database string) Option {
 	return func(o *options) error {
-		// check database is not emtpy
+		// check database is not empty
 		if database == "" {
-			return errors.New("database must not be emtpy ")
+			return errors.New("database must not be empty")
 		}
 		o.config.database = database
 		return nil
@@ -180,6 +189,17 @@ func WithMaxRetry(maxRetry int) Option {
 	}
 }
 
+// WithMaxResponseSize sets the maximum size for  response.  Default is 10mb
+func WithMaxResponseSize(maxResponse int) Option {
+	return func(o *options) error {
+		if maxResponse <= 0 {
+			return errors.New("max response size must be greater than zero")
+		}
+		o.config.maxResponseSize = maxResponse
+		return nil
+	}
+}
+
 // WithLogger sets a custom slog.Logger. Defaults to warn-level logging to stderr.
 func WithLogger(logger *slog.Logger) Option {
 	return func(o *options) error {
@@ -191,18 +211,15 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithBaseURL overrides the default URL.
+// WithBaseURL overrides the default base URL of the Neo4j server.
+// The SDK does not enforce HTTPS — it is the caller's responsibility to use
+// an appropriate scheme for their deployment. Use HTTPS for any server that
+// is not on a trusted loopback interface.
 func WithBaseURL(baseURL string) Option {
 	return func(o *options) error {
 		if baseURL == "" {
 			return errors.New("base URL must not be empty")
 		}
-		/* Might enforce this for Aura DBs if we can figure out the URL.
-		if !strings.HasPrefix(baseURL, "https://") {
-			return errors.New("base URL must use HTTPS to protect credentials in transit")
-		}
-		*/
-
 		o.config.baseURL = baseURL
 		return nil
 	}
@@ -237,8 +254,10 @@ func WithUserAgent(ua string) Option {
 // drops to prevent callers from inadvertently overriding security-sensitive or
 // protocol-critical headers.
 var protectedHeaders = map[string]struct{}{
-	"content-type": {},
-	"user-agent":   {},
+	"authorization": {},
+	"content-type":  {},
+	"accept":        {},
+	"user-agent":    {},
 }
 
 // WithDefaultHeaders adds the given headers to every API request. It is a no-op
@@ -267,7 +286,7 @@ func WithDefaultHeaders(headers map[string]string) Option {
 // should be called via defer when the client is no longer needed to avoid
 // leaking file descriptors.
 //
-//	client, err := aura.NewClient(aura.WithCredentials(id, secret))
+//	client, err := query.NewClient(query.WithBasicAuth("neo4j", "password"))
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -276,7 +295,52 @@ func (c *QueryAPIClient) Close() {
 	c.api.Close()
 }
 
-// NewClient creates a new Aura API client with functional options.
+// minNeo4jVersion is the minimum Neo4j server version this client supports.
+const minNeo4jVersion = "2026.04.0"
+
+// CheckVersion calls the Neo4j discovery endpoint and returns a *VersionError
+// if the server version is older than 2026.04.0. Call this after NewClient
+// when you want to validate the connected server before executing queries.
+//
+//	client, err := query.NewClient(query.WithBasicAuth("neo4j", "password"))
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer client.Close()
+//
+//	if err := client.CheckVersion(ctx); err != nil {
+//	    var verErr *query.VersionError
+//	    if errors.As(err, &verErr) {
+//	        log.Fatalf("server too old: got %s, need %s", verErr.Got, verErr.Required)
+//	    }
+//	    log.Fatal(err)
+//	}
+func (c *QueryAPIClient) CheckVersion(ctx context.Context) error {
+	discovery, err := c.api.Discover(ctx)
+	if err != nil {
+		return fmt.Errorf("CheckVersion: %w", err)
+	}
+
+	if discovery.Neo4jVersion == "" {
+		return fmt.Errorf("CheckVersion: neo4j_version missing from discovery response")
+	}
+
+	got, err := utils.ParseCalVer(discovery.Neo4jVersion)
+	if err != nil {
+		return fmt.Errorf("CheckVersion: %w", err)
+	}
+
+	min, _ := utils.ParseCalVer(minNeo4jVersion) // constant — cannot fail
+
+	if utils.CompareCalVer(got, min) < 0 {
+		return &VersionError{Required: minNeo4jVersion, Got: discovery.Neo4jVersion}
+	}
+
+	c.logger.Info("neo4j version check passed", slog.String("version", discovery.Neo4jVersion))
+	return nil
+}
+
+// NewClient creates a new Query API client with functional options.
 func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	// set the default options.  These will be overridden where this is a supplied option
 	o := defaultOptions()
@@ -302,9 +366,7 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 		return nil, errors.New("API timeout must be greater than zero")
 	}
 
-	// Technically the user agent could be empty. Our usage analysis relies on this being set so
-	// we don't allow it to be empty
-	// Custom userAgent maybe withdrawn.
+	// User-Agent is required for usage analysis. WithUserAgent can override the default.
 	if o.config.userAgent == "" {
 		o.logger.Error("validation failed", slog.String("reason", "User agent cannot be empty"))
 		return nil, errors.New("user agent cannot be empty")
@@ -317,14 +379,16 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	)
 
 	apiSvc := api.NewRequestService(api.Config{
-		AuthHeader:     o.config.authHeader,
-		BaseURL:        o.config.baseURL,
-		APIVersion:     ClientVersion,
-		Timeout:        o.config.apiTimeout,
-		MaxRetry:       o.config.apiRetryMax,
-		UserAgent:      o.config.userAgent,
-		HTTPClient:     o.config.httpClient,
-		DefaultHeaders: o.config.defaultHeaders,
+		AuthHeader:      o.config.authHeader,
+		BaseURL:         o.config.baseURL,
+		Database:        o.config.database,
+		ClientVersion:   ClientVersion,
+		Timeout:         o.config.apiTimeout,
+		MaxRetry:        o.config.apiRetryMax,
+		UserAgent:       o.config.userAgent,
+		HTTPClient:      o.config.httpClient,
+		DefaultHeaders:  o.config.defaultHeaders,
+		MaxResponseSize: o.config.maxResponseSize,
 	}, o.logger)
 
 	clientLogger := o.logger.With(slog.String("component", "QueryAPIClient"))
@@ -337,18 +401,12 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	service.Query = &queryService{
 		api:     apiSvc,
 		timeout: o.config.apiTimeout,
-		logger:  clientLogger.With(slog.String("service", "tenantService")),
+		logger:  clientLogger.With(slog.String("service", "queryService")),
 	}
 
 	service.logger.Info("Query API client initialized successfully",
-		slog.Int("services", 6),
-		slog.String("version", ClientVersion),
-		slog.String("apiVersion", ClientVersion),
+		slog.String("sdk version", ClientVersion),
 	)
 
-	service.logger.Debug("Query API client config",
-		slog.String("base url", o.config.baseURL),
-		slog.String("authheader", o.config.authHeader.Authorize()),
-	)
 	return service, nil
 }

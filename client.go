@@ -23,7 +23,9 @@
 package query
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,6 +34,7 @@ import (
 	"time"
 
 	"github.com/LackOfMorals/query-go-sdk/internal/api"
+	"github.com/LackOfMorals/query-go-sdk/internal/utils"
 )
 
 // ============================================================================
@@ -284,6 +287,51 @@ func WithDefaultHeaders(headers map[string]string) Option {
 //	defer client.Close()
 func (c *QueryAPIClient) Close() {
 	c.api.Close()
+}
+
+// minNeo4jVersion is the minimum Neo4j server version this client supports.
+const minNeo4jVersion = "2026.04.0"
+
+// CheckVersion calls the Neo4j discovery endpoint and returns a *VersionError
+// if the server version is older than 2026.04.0. Call this after NewClient
+// when you want to validate the connected server before executing queries.
+//
+//	client, err := query.NewClient(query.WithBasicAuth("neo4j", "password"))
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer client.Close()
+//
+//	if err := client.CheckVersion(ctx); err != nil {
+//	    var verErr *query.VersionError
+//	    if errors.As(err, &verErr) {
+//	        log.Fatalf("server too old: got %s, need %s", verErr.Got, verErr.Required)
+//	    }
+//	    log.Fatal(err)
+//	}
+func (c *QueryAPIClient) CheckVersion(ctx context.Context) error {
+	discovery, err := c.api.Discover(ctx)
+	if err != nil {
+		return fmt.Errorf("CheckVersion: %w", err)
+	}
+
+	if discovery.Neo4jVersion == "" {
+		return fmt.Errorf("CheckVersion: neo4j_version missing from discovery response")
+	}
+
+	got, err := utils.ParseCalVer(discovery.Neo4jVersion)
+	if err != nil {
+		return fmt.Errorf("CheckVersion: %w", err)
+	}
+
+	min, _ := utils.ParseCalVer(minNeo4jVersion) // constant — cannot fail
+
+	if utils.CompareCalVer(got, min) < 0 {
+		return &VersionError{Required: minNeo4jVersion, Got: discovery.Neo4jVersion}
+	}
+
+	c.logger.Info("neo4j version check passed", slog.String("version", discovery.Neo4jVersion))
+	return nil
 }
 
 // NewClient creates a new Query API client with functional options.

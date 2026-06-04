@@ -84,6 +84,10 @@ func (m *mockRequestService) Delete(_ context.Context) (*api.Response, error) {
 	return m.response, m.err
 }
 
+func (m *mockRequestService) Discover(_ context.Context) (*api.DiscoveryResponse, error) {
+	return &api.DiscoveryResponse{Neo4jVersion: "2026.04.0"}, nil
+}
+
 func (m *mockRequestService) Close() {}
 
 // ============================================================================
@@ -147,6 +151,10 @@ func (m *mockRequestServiceWithDelay) executeWithDelay(ctx context.Context) (*ap
 	return m.response, m.err
 }
 
+func (m *mockRequestServiceWithDelay) Discover(ctx context.Context) (*api.DiscoveryResponse, error) {
+	return &api.DiscoveryResponse{Neo4jVersion: "2026.04.0"}, nil
+}
+
 func (m *mockRequestServiceWithDelay) Close() {}
 
 // ============================================================================
@@ -182,6 +190,10 @@ func (m *contextCheckMock) Patch(_ context.Context, _ string) (*api.Response, er
 func (m *contextCheckMock) Delete(_ context.Context) (*api.Response, error) {
 	m.callCount++
 	return m.response, m.err
+}
+
+func (m *contextCheckMock) Discover(_ context.Context) (*api.DiscoveryResponse, error) {
+	return &api.DiscoveryResponse{Neo4jVersion: "2026.04.0"}, nil
 }
 
 func (m *contextCheckMock) Close() {}

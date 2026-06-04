@@ -600,3 +600,112 @@ func TestError_HasMultipleErrors(t *testing.T) {
 		t.Error("two details: expected HasMultipleErrors() = true")
 	}
 }
+
+// ============================================================================
+// Discover
+// ============================================================================
+
+func TestAPIService_Discover_Success(t *testing.T) {
+	body := `{"neo4j_version":"2026.04.0","neo4j_edition":"enterprise"}`
+	mock := testutil.NewMockHTTPService()
+	mock.WithResponse(http.StatusOK, body)
+	svc := newTestService(mock)
+
+	resp, err := svc.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.LastMethod != "GET" {
+		t.Errorf("expected GET, got %s", mock.LastMethod)
+	}
+	if mock.LastURL != "http://localhost:7474/" {
+		t.Errorf("expected URL 'http://localhost:7474/', got %s", mock.LastURL)
+	}
+	if resp.Neo4jVersion != "2026.04.0" {
+		t.Errorf("expected version '2026.04.0', got %q", resp.Neo4jVersion)
+	}
+	if resp.Neo4jEdition != "enterprise" {
+		t.Errorf("expected edition 'enterprise', got %q", resp.Neo4jEdition)
+	}
+}
+
+func TestAPIService_Discover_SetsAuthHeader(t *testing.T) {
+	mock := testutil.NewMockHTTPService()
+	mock.WithResponse(http.StatusOK, `{"neo4j_version":"2026.04.0"}`)
+	svc := newTestService(mock)
+
+	_, err := svc.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(mock.LastHeaders["Authorization"], "Basic ") {
+		t.Errorf("expected Basic auth header, got %q", mock.LastHeaders["Authorization"])
+	}
+}
+
+func TestAPIService_Discover_NonSuccessStatus(t *testing.T) {
+	mock := testutil.NewMockHTTPService()
+	mock.WithResponse(http.StatusUnauthorized, `{"message":"Unauthorized"}`)
+	svc := newTestService(mock)
+
+	_, err := svc.Discover(context.Background())
+	if err == nil {
+		t.Fatal("expected error for 401 response")
+	}
+	apiErr, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if !apiErr.IsUnauthorized() {
+		t.Errorf("expected IsUnauthorized() = true, got status %d", apiErr.StatusCode)
+	}
+}
+
+func TestAPIService_Discover_NetworkError(t *testing.T) {
+	networkErr := fmt.Errorf("connection refused")
+	mock := testutil.NewMockHTTPService()
+	mock.WithError(networkErr)
+	svc := newTestService(mock)
+
+	_, err := svc.Discover(context.Background())
+	if err == nil {
+		t.Fatal("expected error from network failure")
+	}
+	if !errors.Is(err, networkErr) {
+		t.Errorf("expected networkErr, got %v", err)
+	}
+}
+
+func TestAPIService_Discover_CancelledContext(t *testing.T) {
+	mock := testutil.NewMockHTTPService()
+	mock.WithResponse(http.StatusOK, `{"neo4j_version":"2026.04.0"}`)
+	svc := newTestService(mock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := svc.Discover(ctx)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if mock.CallCount != 0 {
+		t.Errorf("expected no HTTP call for cancelled context, got %d", mock.CallCount)
+	}
+}
+
+func TestAPIService_Discover_MalformedJSON(t *testing.T) {
+	mock := testutil.NewMockHTTPService()
+	mock.WithResponse(http.StatusOK, `not-json`)
+	svc := newTestService(mock)
+
+	_, err := svc.Discover(context.Background())
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+	if !strings.Contains(err.Error(), "unmarshal") {
+		t.Errorf("expected unmarshal error, got: %v", err)
+	}
+}

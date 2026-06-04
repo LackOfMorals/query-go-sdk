@@ -100,6 +100,51 @@ func (s *apiRequestService) Close() {
 	s.httpClient.Close()
 }
 
+// Discover calls the Neo4j discovery endpoint (GET /) and returns server
+// metadata. The same Authorization and User-Agent headers are sent as for
+// regular query requests.
+func (s *apiRequestService) Discover(ctx context.Context) (*DiscoveryResponse, error) {
+	if err := ctx.Err(); err != nil {
+		s.logger.ErrorContext(ctx, "context already cancelled before discover", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"User-Agent":    s.userAgent,
+		"Authorization": s.authHeader.Authorize(),
+	}
+
+	url := s.baseURL + "/"
+
+	s.logger.DebugContext(ctx, "calling discovery endpoint", slog.String("url", url))
+
+	resp, err := s.httpClient.Get(ctx, url, headers)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "discovery request failed",
+			slog.String("url", url),
+			slog.String("error", err.Error()),
+		)
+		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(resp.Body, resp.StatusCode)
+	}
+
+	var discovery DiscoveryResponse
+	if err := json.Unmarshal(resp.Body, &discovery); err != nil {
+		return nil, fmt.Errorf("discover: unmarshal response: %w", err)
+	}
+
+	s.logger.DebugContext(ctx, "discovery response",
+		slog.String("neo4j_version", discovery.Neo4jVersion),
+		slog.String("neo4j_edition", discovery.Neo4jEdition),
+	)
+
+	return &discovery, nil
+}
+
 // Get performs an authenticated GET request.
 func (s *apiRequestService) Get(ctx context.Context) (*Response, error) {
 	return s.doAuthenticatedRequest(ctx, http.MethodGet, "")

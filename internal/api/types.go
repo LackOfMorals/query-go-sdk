@@ -74,6 +74,12 @@ type apiRequestService struct {
 // Compile-time interface compliance check.
 var _ RequestService = (*apiRequestService)(nil)
 
+// DiscoveryResponse holds the fields returned by the Neo4j discovery endpoint (GET /).
+type DiscoveryResponse struct {
+	Neo4jVersion string `json:"neo4j_version"`
+	Neo4jEdition string `json:"neo4j_edition"`
+}
+
 // RequestService defines the interface for making authenticated API requests.
 // This is the middle layer that handles authentication and common API patterns.
 type RequestService interface {
@@ -82,6 +88,9 @@ type RequestService interface {
 	Put(ctx context.Context, body string) (*Response, error)
 	Patch(ctx context.Context, body string) (*Response, error)
 	Delete(ctx context.Context) (*Response, error)
+	// Discover calls the Neo4j discovery endpoint (GET /) and returns server metadata,
+	// including the neo4j_version field used by CheckVersion.
+	Discover(ctx context.Context) (*DiscoveryResponse, error)
 	// Close releases idle connections held by the underlying HTTP transport.
 	// It should be called (typically via defer) when the client is no longer needed.
 	Close()

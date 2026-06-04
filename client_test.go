@@ -1,11 +1,15 @@
 package query
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/LackOfMorals/query-go-sdk/internal/api"
 )
 
 func TestNewClient_WithBasicAuth_Success(t *testing.T) {
@@ -287,5 +291,83 @@ func TestNewClient_MultipleOptions_Success(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected client to be non-nil")
+	}
+}
+
+// ============================================================================
+// CheckVersion tests
+// ============================================================================
+
+// versionMock wraps mockRequestService and overrides Discover.
+type versionMock struct {
+	mockRequestService
+	discoverResp *api.DiscoveryResponse
+	discoverErr  error
+}
+
+func (m *versionMock) Discover(_ context.Context) (*api.DiscoveryResponse, error) {
+	return m.discoverResp, m.discoverErr
+}
+
+func newVersionClient(mock api.RequestService) *QueryAPIClient {
+	c := &QueryAPIClient{api: mock, logger: testLogger()}
+	c.Query = &queryService{api: mock, timeout: 30 * time.Second, logger: testLogger()}
+	return c
+}
+
+func TestCheckVersion_PassesWhenAtMinimum(t *testing.T) {
+	mock := &versionMock{discoverResp: &api.DiscoveryResponse{Neo4jVersion: "2026.04.0"}}
+	if err := newVersionClient(mock).CheckVersion(context.Background()); err != nil {
+		t.Fatalf("expected no error for minimum version, got: %v", err)
+	}
+}
+
+func TestCheckVersion_PassesWhenNewer(t *testing.T) {
+	for _, v := range []string{"2026.05.0", "2026.04.1", "2027.01.0"} {
+		mock := &versionMock{discoverResp: &api.DiscoveryResponse{Neo4jVersion: v}}
+		if err := newVersionClient(mock).CheckVersion(context.Background()); err != nil {
+			t.Errorf("version %s: expected pass, got: %v", v, err)
+		}
+	}
+}
+
+func TestCheckVersion_FailsWhenTooOld(t *testing.T) {
+	for _, v := range []string{"2026.03.9", "2025.12.0", "2024.01.0"} {
+		mock := &versionMock{discoverResp: &api.DiscoveryResponse{Neo4jVersion: v}}
+		err := newVersionClient(mock).CheckVersion(context.Background())
+		if err == nil {
+			t.Errorf("version %s: expected VersionError, got nil", v)
+			continue
+		}
+		var verErr *VersionError
+		if !errors.As(err, &verErr) {
+			t.Errorf("version %s: expected *VersionError, got %T: %v", v, err, err)
+			continue
+		}
+		if verErr.Got != v {
+			t.Errorf("version %s: VersionError.Got = %q", v, verErr.Got)
+		}
+		if verErr.Required != minNeo4jVersion {
+			t.Errorf("version %s: VersionError.Required = %q, want %q", v, verErr.Required, minNeo4jVersion)
+		}
+	}
+}
+
+func TestCheckVersion_MissingVersionField(t *testing.T) {
+	mock := &versionMock{discoverResp: &api.DiscoveryResponse{Neo4jVersion: ""}}
+	if err := newVersionClient(mock).CheckVersion(context.Background()); err == nil {
+		t.Fatal("expected error for missing neo4j_version")
+	}
+}
+
+func TestCheckVersion_DiscoverError(t *testing.T) {
+	discoverErr := &api.Error{StatusCode: 401, Message: "Unauthorized"}
+	mock := &versionMock{discoverErr: discoverErr}
+	err := newVersionClient(mock).CheckVersion(context.Background())
+	if err == nil {
+		t.Fatal("expected error when Discover fails")
+	}
+	if !errors.Is(err, discoverErr) {
+		t.Errorf("expected wrapped discoverErr, got: %v", err)
 	}
 }

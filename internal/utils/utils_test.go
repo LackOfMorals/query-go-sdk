@@ -378,3 +378,92 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// ─── ParseCalVer ────────────────────────────────────────────────────────────
+
+func TestParseCalVer_Valid(t *testing.T) {
+	tests := []struct {
+		input string
+		want  [3]int
+	}{
+		{"2026.04.0", [3]int{2026, 4, 0}},
+		{"2026.4.0", [3]int{2026, 4, 0}},
+		{"2025.12.3", [3]int{2025, 12, 3}},
+		{"2024.01.99", [3]int{2024, 1, 99}},
+		{"2030.06.1", [3]int{2030, 6, 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseCalVer(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCalVer_Invalid(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"2026.04"},     // only two components
+		{"2026"},        // one component
+		{""},            // empty
+		{"2026.04.abc"}, // non-numeric patch
+		{"abc.04.0"},    // non-numeric year
+		{"2026.xx.0"},   // non-numeric month
+		{"2026.04.0.1"}, // extra component (SplitN stops at 3, so "0.1" is the patch — fails Atoi)
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := ParseCalVer(tt.input)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", tt.input)
+			}
+		})
+	}
+}
+
+// ─── CompareCalVer ──────────────────────────────────────────────────────────
+
+func TestCompareCalVer(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		// equal
+		{"2026.04.0", "2026.04.0", 0},
+		// year differences
+		{"2027.01.0", "2026.04.0", 1},
+		{"2025.12.0", "2026.04.0", -1},
+		// month differences within same year
+		{"2026.05.0", "2026.04.0", 1},
+		{"2026.03.0", "2026.04.0", -1},
+		// patch differences
+		{"2026.04.1", "2026.04.0", 1},
+		{"2026.04.0", "2026.04.1", -1},
+		// minimum required version boundaries
+		{"2026.04.0", "2026.04.0", 0},  // exactly at minimum → pass
+		{"2026.03.9", "2026.04.0", -1}, // one month before → fail
+		{"2026.05.0", "2026.04.0", 1},  // one month after → pass
+	}
+	for _, tt := range tests {
+		t.Run(tt.a+"_vs_"+tt.b, func(t *testing.T) {
+			a, err := ParseCalVer(tt.a)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.a, err)
+			}
+			b, err := ParseCalVer(tt.b)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.b, err)
+			}
+			got := CompareCalVer(a, b)
+			if got != tt.want {
+				t.Errorf("CompareCalVer(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}

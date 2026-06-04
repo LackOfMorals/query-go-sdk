@@ -352,3 +352,61 @@ func TestClientVersion_IsAccessible(t *testing.T) {
 		t.Error("ClientVersion must not be empty")
 	}
 }
+
+// ─── CheckVersion ─────────────────────────────────────────────────────────────
+
+func TestCheckVersion_Integration_Passes(t *testing.T) {
+	srv := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" && r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"neo4j_version": "2026.04.0",
+				"neo4j_edition": "enterprise",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+
+	if err := newClient(t, srv).CheckVersion(context.Background()); err != nil {
+		t.Fatalf("CheckVersion: %v", err)
+	}
+}
+
+func TestCheckVersion_Integration_TooOld(t *testing.T) {
+	srv := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"neo4j_version": "2025.12.0",
+			"neo4j_edition": "community",
+		})
+	}))
+
+	err := newClient(t, srv).CheckVersion(context.Background())
+	if err == nil {
+		t.Fatal("expected VersionError for old server")
+	}
+	var verErr *query.VersionError
+	if !errors.As(err, &verErr) {
+		t.Fatalf("expected *query.VersionError, got %T: %v", err, err)
+	}
+	if verErr.Got != "2025.12.0" {
+		t.Errorf("expected Got=2025.12.0, got %q", verErr.Got)
+	}
+}
+
+func TestCheckVersion_Integration_Unauthorised(t *testing.T) {
+	srv := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"message": "Unauthorized"})
+	}))
+
+	err := newClient(t, srv).CheckVersion(context.Background())
+	if err == nil {
+		t.Fatal("expected error for 401 discovery response")
+	}
+	var apiErr *query.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *query.Error, got %T: %v", err, err)
+	}
+	if !apiErr.IsUnauthorized() {
+		t.Errorf("expected IsUnauthorized() = true, got status %d", apiErr.StatusCode)
+	}
+}

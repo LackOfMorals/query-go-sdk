@@ -38,12 +38,6 @@ import (
 // Constants and version
 // ============================================================================
 
-// neo4jVersion is the min version of Neo4jthis client targets.
-// Query API has evolved over time and , whilst avoiding breaking changes, there
-// are differences such that a min version is necessary
-
-const neo4jVersion = ""
-
 // clientVersionFallback is embedded in the User-Agent when the real module version cannot
 // be determined (local builds, go test, go run). It is intentionally kept as "development"
 // in source — there is no need to update it before tagging a release.

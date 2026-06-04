@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/LackOfMorals/query-go-sdk/internal/httpclient"
@@ -48,14 +47,16 @@ type StaticCredentials struct {
 
 // Config holds configuration for the API service.
 type Config struct {
-	AuthHeader     Credentials
-	BaseURL        string
-	APIVersion     string
-	Timeout        time.Duration
-	MaxRetry       int
-	UserAgent      string            // e.g. "aura-go-client/v1.8.0"; defaults to "aura-go-client" if empty
-	HTTPClient     *http.Client      // optional custom HTTP client; when non-nil it replaces the default transport
-	DefaultHeaders map[string]string // optional headers merged into every authenticated request
+	AuthHeader      Credentials
+	BaseURL         string
+	Database        string
+	ClientVersion   string
+	Timeout         time.Duration
+	MaxRetry        int
+	UserAgent       string            // e.g. "query-go-sdk/v1.0.0"; defaults to "query-go-client/<version>" if empty
+	HTTPClient      *http.Client      // optional custom HTTP client; when non-nil it replaces the default transport
+	DefaultHeaders  map[string]string // optional headers merged into every authenticated request
+	MaxResponseSize int               // The max size for a response.  Default is 10Mb
 }
 
 // apiRequestService is the concrete implementation of RequestService.
@@ -63,7 +64,8 @@ type apiRequestService struct {
 	httpClient     httpclient.HTTPService
 	authHeader     Credentials
 	baseURL        string
-	endpointBase   string
+	database       string
+	clientVersion  string
 	userAgent      string
 	defaultHeaders map[string]string
 	logger         *slog.Logger
@@ -71,24 +73,6 @@ type apiRequestService struct {
 
 // Compile-time interface compliance check.
 var _ RequestService = (*apiRequestService)(nil)
-
-// authManager handles token management for the API.
-type authManager struct {
-	username  string
-	password  string
-	tokenType string
-	token     string
-	expiresAt int64
-	logger    *slog.Logger
-	mu        sync.RWMutex
-}
-
-// tokenResponse represents the OAuth token response.
-type tokenResponse struct {
-	TokenType   string `json:"token_type"`
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int64  `json:"expires_in"`
-}
 
 // RequestService defines the interface for making authenticated API requests.
 // This is the middle layer that handles authentication and common API patterns.

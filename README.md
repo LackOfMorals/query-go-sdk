@@ -19,6 +19,10 @@ result, err := query.WithTransformer(client.Query, ctx,
 - [Context and Timeouts](#context-and-timeouts)
 - [Executing Queries](#executing-queries)
 - [Transformers](#transformers)
+  - [EagerResultTransformer](#eagerresulttransformer)
+  - [Collect](#collect)
+  - [Single](#single)
+  - [Custom transformers](#custom-transformers)
 - [Working with Records](#working-with-records)
 - [Error Handling](#error-handling)
 - [Best Practices](#best-practices)
@@ -105,14 +109,15 @@ client, err := query.NewClient(
 
 | Option | Default | Description |
 |---|---|---|
-| `WithBaseURL(url)` | `http://localhost:7474/db/neo4j/query/v2` | Base URL of the Neo4j server |
+| `WithBaseURL(url)` | `http://localhost:7474` | Base URL of the Neo4j server |
 | `WithDatabase(db)` | — | Target database name |
 | `WithTimeout(d)` | 120s | Per-request timeout |
 | `WithMaxRetry(n)` | 3 | Maximum retry attempts on transient failure |
 | `WithLogger(l)` | warn to stderr | Structured `*slog.Logger` |
 | `WithHTTPClient(c)` | default transport | Custom `*http.Client` (for mTLS, proxies, etc.) |
 | `WithUserAgent(ua)` | `query-go-sdk/<version>` | Value of the `User-Agent` header |
-| `WithDefaultHeaders(map)` | — | Extra headers sent with every request; `Authorization`, `Content-Type`, and `User-Agent` are protected and cannot be overridden |
+| `WithMaxResponseSize(n)` | 10MB | Maximum response body size in bytes; returns an error if exceeded |
+| `WithDefaultHeaders(map)` | — | Extra headers sent with every request; `Authorization`, `Content-Type`, `Accept`, and `User-Agent` are protected and cannot be overridden |
 
 ```go
 client, err := query.NewClient(
@@ -158,30 +163,28 @@ if errors.Is(err, context.Canceled) {
 
 ### Direct execution
 
-`client.Query.Execute` returns a `*decode.Response` containing the raw decoded result.
+`client.Query.Execute` returns a `*query.Response` containing the raw decoded result.
 
 ```go
-import "github.com/LackOfMorals/query-go-sdk/internal/decode"
-
 resp, err := client.Query.Execute(ctx, "RETURN 1 AS n", nil)
 if err != nil {
     log.Fatal(err)
 }
 
-fmt.Println(resp.Fields)   // ["n"]
-fmt.Println(resp.Rows)     // [[int64(1)]]
+fmt.Println(resp.Fields)    // ["n"]
+fmt.Println(resp.Rows)      // [[int64(1)]]
 fmt.Println(resp.Bookmarks)
 ```
 
-`decode.Response` fields:
+`query.Response` fields:
 
 | Field | Type | Description |
 |---|---|---|
 | `Fields` | `[]string` | Ordered column names |
-| `Rows` | `[][]any` | Decoded row values |
-| `Notifications` | `[]decode.Notification` | Advisory warnings from Neo4j |
+| `Rows` | `[][]any` | Decoded row values (see type mapping below) |
+| `Notifications` | `[]query.Notification` | Advisory messages from Neo4j |
 | `Bookmarks` | `[]string` | Transaction bookmarks |
-| `QueryPlan` | `*decode.PlanOperator` | Non-nil for EXPLAIN/PROFILE queries |
+| `QueryPlan` | `*query.PlanOperator` | Non-nil for EXPLAIN/PROFILE queries |
 
 ### Passing parameters
 
@@ -196,7 +199,13 @@ resp, err := client.Query.Execute(ctx,
 
 ## Transformers
 
-The transformer pattern mirrors the Neo4j Go driver's `neo4j.ExecuteQuery`. A transformer converts `*decode.Response` into a typed Go value.
+The transformer pattern mirrors the Neo4j Go driver's `neo4j.ExecuteQuery`. A transformer is a function that converts `*query.Response` into a typed Go value:
+
+```go
+type ResultTransformer[T any] func(*query.Response) (T, error)
+```
+
+Three built-in transformers cover the common cases. You can also write your own — see [Custom transformers](#custom-transformers).
 
 ```go
 result, err := query.WithTransformer(svc, ctx, cypher, params, transformer)
@@ -273,6 +282,37 @@ movie, err := query.WithTransformer(
 )
 ```
 
+### Custom transformers
+
+Because `*query.Response` is part of the public API, you can write your own `ResultTransformer` for cases that `EagerResultTransformer`, `Collect`, and `Single` don't cover.
+
+```go
+// A transformer that extracts a single column as a flat []string
+func firstColumnStrings(resp *query.Response) ([]string, error) {
+    out := make([]string, 0, len(resp.Rows))
+    for _, row := range resp.Rows {
+        if len(row) == 0 {
+            continue
+        }
+        s, ok := row[0].(string)
+        if !ok {
+            return nil, fmt.Errorf("expected string, got %T", row[0])
+        }
+        out = append(out, s)
+    }
+    return out, nil
+}
+
+names, err := query.WithTransformer(
+    client.Query, ctx,
+    "MATCH (n:Person) RETURN n.name",
+    nil,
+    query.ResultTransformer[[]string](firstColumnStrings),
+)
+```
+
+Custom transformers work with any named function whose signature matches `func(*query.Response) (T, error)`.
+
 ---
 
 ## Working with Records
@@ -282,22 +322,61 @@ movie, err := query.WithTransformer(
 ### Typed accessors
 
 ```go
-s, ok  := rec.GetString("name")
-n, ok  := rec.GetInt64("count")
-f, ok  := rec.GetFloat64("score")
-b, ok  := rec.GetBool("active")
-bs, ok := rec.GetBytes("data")
-t, ok  := rec.GetTime("createdAt")
-d, ok  := rec.GetDuration("lifespan")
-p, ok  := rec.GetPoint("location")
-node, ok := rec.GetNode("n")
-rel, ok  := rec.GetRelationship("r")
-path, ok := rec.GetPath("p")
-list, ok := rec.GetList("tags")
-m, ok    := rec.GetMap("props")
+s, ok    := rec.GetString("name")          // string
+n, ok    := rec.GetInt64("count")          // int64
+f, ok    := rec.GetFloat64("score")        // float64
+b, ok    := rec.GetBool("active")          // bool
+bs, ok   := rec.GetBytes("data")           // []byte
+t, ok    := rec.GetTime("createdAt")       // time.Time
+d, ok    := rec.GetDuration("lifespan")    // query.Duration
+p, ok    := rec.GetPoint("location")       // query.Point
+node, ok := rec.GetNode("n")               // *query.Node
+rel, ok  := rec.GetRelationship("r")       // *query.Relationship
+path, ok := rec.GetPath("p")               // query.Path
+list, ok := rec.GetList("tags")            // []any
+m, ok    := rec.GetMap("props")            // map[string]any
 ```
 
 All accessors return `(zero, false)` when the field is absent or null.
+
+### Graph entity types
+
+`query.Node`, `query.Relationship`, and `query.Path` are part of the public API — you can use them in your own function signatures:
+
+```go
+func nodeLabel(n *query.Node) string {
+    if len(n.Labels) > 0 {
+        return n.Labels[0]
+    }
+    return ""
+}
+
+func relSummary(r *query.Relationship) string {
+    return fmt.Sprintf("[%s]", r.Type)
+}
+```
+
+`query.Node` fields: `ElementID string`, `Labels []string`, `Properties map[string]any`.  
+`query.Relationship` fields: `ElementID`, `StartNodeElementID`, `EndNodeElementID string`, `Type string`, `Properties map[string]any`.
+
+### Neo4j → Go type mapping
+
+| Neo4j type | Go type |
+|---|---|
+| Null | `nil` |
+| Boolean | `bool` |
+| Integer | `int64` |
+| Float | `float64` |
+| String | `string` |
+| ByteArray | `[]byte` |
+| List | `[]any` |
+| Map | `map[string]any` |
+| Date / Time / DateTime / LocalTime / LocalDateTime | `time.Time` |
+| Duration | `query.Duration` |
+| Point (2D / 3D) | `query.Point` |
+| Node | `*query.Node` |
+| Relationship | `*query.Relationship` |
+| Path | `query.Path` |
 
 ### Generic accessor
 

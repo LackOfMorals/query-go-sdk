@@ -38,12 +38,6 @@ import (
 // Constants and version
 // ============================================================================
 
-// neo4jVersion is the min version of Neo4jthis client targets.
-// Query API has evolved over time and , whilst avoiding breaking changes, there
-// are differences such that a min version is necessary
-
-const neo4jVersion = ""
-
 // clientVersionFallback is embedded in the User-Agent when the real module version cannot
 // be determined (local builds, go test, go run). It is intentionally kept as "development"
 // in source — there is no need to update it before tagging a release.
@@ -74,7 +68,7 @@ func init() {
 
 // QueryAPIClient is the main client for interacting with the Neo4j Aura API.
 //
-//nolint:revive // QueryAPIClient is intentional: the package is named quert and the type name is established in v1.
+//nolint:revive // QueryAPIClient is intentional: the package is named query and the type name is established in v1.
 type QueryAPIClient struct {
 	api    api.RequestService // Handles authenticated API requests
 	logger *slog.Logger       // Structured logger
@@ -85,15 +79,16 @@ type QueryAPIClient struct {
 
 // config holds internal configuration (unexported).
 type config struct {
-	baseURL        string            // the base URL of neo4j server
-	apiTimeout     time.Duration     // how long to wait for a response from an Aura API endpoint
-	apiRetryMax    int               // the number of retries to attempt
-	authHeader     api.Credentials   // The auth header value to use
-	database       string            // database
-	httpClient     *http.Client      // optional custom HTTP client (injected transport)
-	userAgent      string            // optional User-Agent override
-	defaultHeaders map[string]string // optional headers added to every API request
-	clientVersion  string            // the version of this query client
+	baseURL         string            // the base URL of neo4j server
+	apiTimeout      time.Duration     // how long to wait for a response from an Aura API endpoint
+	apiRetryMax     int               // the number of retries to attempt
+	authHeader      api.Credentials   // The auth header value to use
+	database        string            // database
+	httpClient      *http.Client      // optional custom HTTP client (injected transport)
+	userAgent       string            // optional User-Agent override
+	defaultHeaders  map[string]string // optional headers added to every API request
+	maxResponseSize int               // optional max response size in bytes
+	clientVersion   string            // the version of this query client
 }
 
 // Option is a functional option for configuring the AuraAPIClient.
@@ -116,11 +111,13 @@ func defaultOptions() *options {
 
 	return &options{
 		config: config{
-			baseURL:       "http://localhost:7474/db/neo4j/query/v2",
-			apiTimeout:    120 * time.Second,
-			apiRetryMax:   3,
-			clientVersion: ClientVersion,
-			userAgent:     "query-go-sdk/" + ClientVersion,
+			baseURL:         "http://localhost:7474",
+			database:        "neo4j",
+			apiTimeout:      120 * time.Second,
+			apiRetryMax:     3,
+			clientVersion:   ClientVersion,
+			userAgent:       "query-go-sdk/" + ClientVersion,
+			maxResponseSize: 10 * 1024 * 1024, // This is 10mb
 		},
 		logger: slog.New(handler),
 	}
@@ -149,9 +146,9 @@ func WithBearerToken(token string) Option {
 // WithDatabase
 func WithDatabase(database string) Option {
 	return func(o *options) error {
-		// check database is not emtpy
+		// check database is not empty
 		if database == "" {
-			return errors.New("database must not be emtpy ")
+			return errors.New("database must not be empty")
 		}
 		o.config.database = database
 		return nil
@@ -176,6 +173,17 @@ func WithMaxRetry(maxRetry int) Option {
 			return errors.New("max retries must be greater than zero")
 		}
 		o.config.apiRetryMax = maxRetry
+		return nil
+	}
+}
+
+// WithMaxResponseSize sets the maximum size for  response.  Default is 10mb
+func WithMaxResponseSize(maxResponse int) Option {
+	return func(o *options) error {
+		if maxResponse <= 0 {
+			return errors.New("max response size must be greater than zero")
+		}
+		o.config.maxResponseSize = maxResponse
 		return nil
 	}
 }
@@ -237,8 +245,10 @@ func WithUserAgent(ua string) Option {
 // drops to prevent callers from inadvertently overriding security-sensitive or
 // protocol-critical headers.
 var protectedHeaders = map[string]struct{}{
-	"content-type": {},
-	"user-agent":   {},
+	"authorization": {},
+	"content-type":  {},
+	"accept":        {},
+	"user-agent":    {},
 }
 
 // WithDefaultHeaders adds the given headers to every API request. It is a no-op
@@ -267,7 +277,7 @@ func WithDefaultHeaders(headers map[string]string) Option {
 // should be called via defer when the client is no longer needed to avoid
 // leaking file descriptors.
 //
-//	client, err := aura.NewClient(aura.WithCredentials(id, secret))
+//	client, err := query.NewClient(query.WithBasicAuth("neo4j", "password"))
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -276,7 +286,7 @@ func (c *QueryAPIClient) Close() {
 	c.api.Close()
 }
 
-// NewClient creates a new Aura API client with functional options.
+// NewClient creates a new Query API client with functional options.
 func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	// set the default options.  These will be overridden where this is a supplied option
 	o := defaultOptions()
@@ -317,14 +327,16 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	)
 
 	apiSvc := api.NewRequestService(api.Config{
-		AuthHeader:     o.config.authHeader,
-		BaseURL:        o.config.baseURL,
-		APIVersion:     ClientVersion,
-		Timeout:        o.config.apiTimeout,
-		MaxRetry:       o.config.apiRetryMax,
-		UserAgent:      o.config.userAgent,
-		HTTPClient:     o.config.httpClient,
-		DefaultHeaders: o.config.defaultHeaders,
+		AuthHeader:      o.config.authHeader,
+		BaseURL:         o.config.baseURL,
+		Database:        o.config.database,
+		ClientVersion:   ClientVersion,
+		Timeout:         o.config.apiTimeout,
+		MaxRetry:        o.config.apiRetryMax,
+		UserAgent:       o.config.userAgent,
+		HTTPClient:      o.config.httpClient,
+		DefaultHeaders:  o.config.defaultHeaders,
+		MaxResponseSize: o.config.maxResponseSize,
 	}, o.logger)
 
 	clientLogger := o.logger.With(slog.String("component", "QueryAPIClient"))
@@ -337,18 +349,12 @@ func NewClient(opts ...Option) (*QueryAPIClient, error) {
 	service.Query = &queryService{
 		api:     apiSvc,
 		timeout: o.config.apiTimeout,
-		logger:  clientLogger.With(slog.String("service", "tenantService")),
+		logger:  clientLogger.With(slog.String("service", "queryService")),
 	}
 
 	service.logger.Info("Query API client initialized successfully",
-		slog.Int("services", 6),
-		slog.String("version", ClientVersion),
-		slog.String("apiVersion", ClientVersion),
+		slog.String("sdk version", ClientVersion),
 	)
 
-	service.logger.Debug("Query API client config",
-		slog.String("base url", o.config.baseURL),
-		slog.String("authheader", o.config.authHeader.Authorize()),
-	)
 	return service, nil
 }

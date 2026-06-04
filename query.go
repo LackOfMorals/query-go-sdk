@@ -15,7 +15,6 @@ import (
 // Types
 // ============================================================================
 
-// instanceService handles instance operations.
 type queryService struct {
 	api     api.RequestService
 	timeout time.Duration
@@ -32,8 +31,8 @@ type queryRequest struct {
 // Service
 // ============================================================================
 
-// Executues a Cypher statement
-func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[string]any) (*decode.Response, error) {
+// Execute runs a Cypher statement and returns the decoded response.
+func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[string]any) (*Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 
@@ -48,11 +47,7 @@ func (q *queryService) Execute(ctx context.Context, qry string, qryParams map[st
 		return nil, fmt.Errorf("query: marshal request: %w", err)
 	}
 
-	// For now, convert back to a string
-	body := fmt.Sprintf("%s", bodyMarshalled)
-
-	// cypherQry := `{"statement": "MATCH (p:Person)-[a:ACTED_IN]-(m:Movie {title:'The Matrix'}) RETURN p.name, m.title, a.roles"}"`
-	// cypherQry := `{"statement": "MATCH (p)-[a]-(m) RETURN * LIMIT 5"}"`
+	body := string(bodyMarshalled)
 
 	resp, err := q.api.Post(ctx, body)
 	if err != nil {

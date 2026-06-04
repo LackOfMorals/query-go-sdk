@@ -41,7 +41,7 @@ func networkOnlyRetryPolicy(ctx context.Context, resp *http.Response, err error)
 // When customClient is non-nil it is used as the base http.Client inside the
 // retryable wrapper (replacing the default transport). When nil the service
 // constructs a default client with production-suitable connection pool settings.
-func NewHTTPService(timeout time.Duration, maxRetry int, logger *slog.Logger, customClient *http.Client) HTTPService {
+func NewHTTPService(timeout time.Duration, maxRetry int, maxResponse int, logger *slog.Logger, customClient *http.Client) HTTPService {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = maxRetry
 	retryClient.RetryWaitMin = 1 * time.Second
@@ -75,9 +75,10 @@ func NewHTTPService(timeout time.Duration, maxRetry int, logger *slog.Logger, cu
 	}
 
 	return &httpService{
-		timeout: timeout,
-		client:  retryClient,
-		logger:  logger,
+		timeout:         timeout,
+		client:          retryClient,
+		logger:          logger,
+		maxResponseSize: maxResponse,
 	}
 }
 
@@ -144,16 +145,24 @@ func (s *httpService) doRequest(ctx context.Context, method, url string, headers
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	limitedReader := io.LimitReader(resp.Body, DefaultMaxResponseSize)
+	// We want to read just beyond our maxResponseSize.
+	// as response body = maxResponseSize is valid
+	// We can then see if the response is larger than max and return an error if it is
+	limitedReader := io.LimitReader(resp.Body, int64(s.maxResponseSize+1024))
 	responseBody, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if len(responseBody) > s.maxResponseSize {
+		return nil, fmt.Errorf("response body size exceeds maximum size of %d bytes", s.maxResponseSize)
 	}
 
 	s.logger.DebugContext(ctx, "HTTP response received",
 		slog.String("method", method),
 		slog.String("url", url),
 		slog.Int("status", resp.StatusCode),
+		slog.Int("response body size", len(responseBody)),
 	)
 
 	return &HTTPResponse{

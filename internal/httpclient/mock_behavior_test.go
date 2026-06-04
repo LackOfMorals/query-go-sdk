@@ -22,7 +22,7 @@ import (
 // newSvc creates an HTTPService suitable for behavioral tests.
 func newSvc(timeout time.Duration) httpclient.HTTPService {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return httpclient.NewHTTPService(timeout, 0, logger, nil)
+	return httpclient.NewHTTPService(timeout, 0, 10*1024*1024, logger, nil)
 }
 
 // ─── Basic method dispatch ────────────────────────────────────────────────────

@@ -9,8 +9,9 @@ import (
 
 // QueryService defines operations for using the Query API
 type QueryService interface {
-	// Runs a Cypher statement
-	Execute(ctx context.Context, qry string, qryParams map[string]any) (*decode.Response, error)
+	// Execute runs a Cypher statement and returns the raw decoded response.
+	// Use WithTransformer to map the result to a typed value.
+	Execute(ctx context.Context, qry string, qryParams map[string]any) (*Response, error)
 }
 
 // Compile-time interface compliance checks
@@ -18,10 +19,45 @@ var (
 	_ QueryService = (*queryService)(nil)
 )
 
-// Re-export error types from internal/decode so callers never need to import
-// internal packages directly.
+// ============================================================================
+// Re-exported types from internal/decode
+//
+// These aliases expose the full public surface of the SDK so callers never
+// need to import internal packages directly. They are identical to their
+// decode counterparts — no conversion is needed.
+// ============================================================================
 
-// QueryErrors is returned when Neo4j responds with one or more errors.
+// Response is the decoded result of a Cypher query execution.
+// Fields holds the ordered column names; Rows holds one []any per row where
+// each element is a fully decoded Go value (see DecodeValue for the type mapping).
+type Response = decode.Response
+
+// Notification is an advisory message from Neo4j about the executed statement.
+// Notifications are not errors — the query succeeded and rows are returned alongside them.
+type Notification = decode.Notification
+
+// PlanOperator is one node in an EXPLAIN or PROFILE query plan tree.
+type PlanOperator = decode.PlanOperator
+
+// Node represents a Neo4j NODE value returned by a Cypher query.
+type Node = decode.Node
+
+// Relationship represents a Neo4j RELATIONSHIP value.
+type Relationship = decode.Relationship
+
+// Path represents a Neo4j PATH value — an alternating sequence of nodes and relationships.
+type Path = decode.Path
+
+// Duration represents a Neo4j DURATION value. It cannot be represented as
+// time.Duration because months and days are calendar-relative.
+type Duration = decode.Duration
+
+// Point represents a Neo4j POINT value with an SRID identifying the coordinate
+// reference system. Common SRIDs: 4326 (WGS-84 2D), 4979 (WGS-84 3D),
+// 7203 (Cartesian 2D), 9157 (Cartesian 3D).
+type Point = decode.Point
+
+// QueryErrors is returned when Neo4j responds with one or more query errors.
 // Inspect with errors.As:
 //
 //	var qErr *query.QueryErrors

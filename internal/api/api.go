@@ -73,17 +73,19 @@ func (e *Error) IsBadRequest() bool {
 // retryable wrapper, letting callers inject custom transports (mTLS, proxies,
 // testing). When nil a default client with production-suitable settings is used.
 func NewRequestService(cfg Config, logger *slog.Logger) RequestService {
-	httpSvc := httpclient.NewHTTPService(cfg.Timeout, cfg.MaxRetry, logger, cfg.HTTPClient)
+	httpSvc := httpclient.NewHTTPService(cfg.Timeout, cfg.MaxRetry, cfg.MaxResponseSize, logger, cfg.HTTPClient)
 
 	userAgent := cfg.UserAgent
+	// Submit our own user agent when none is given
 	if userAgent == "" {
-		userAgent = "query-go-client"
+		userAgent = fmt.Sprintf("%s/%s", "query-go-client", cfg.ClientVersion)
 	}
 
 	return &apiRequestService{
 		httpClient:     httpSvc,
 		baseURL:        cfg.BaseURL,
-		endpointBase:   cfg.BaseURL + "/" + cfg.APIVersion,
+		database:       cfg.Database,
+		clientVersion:  cfg.ClientVersion,
 		userAgent:      userAgent,
 		defaultHeaders: cfg.DefaultHeaders,
 		authHeader:     cfg.AuthHeader,
@@ -141,9 +143,10 @@ func (s *apiRequestService) doAuthenticatedRequest(ctx context.Context, method, 
 	headers["User-Agent"] = s.userAgent
 	headers["Authorization"] = s.authHeader.Authorize()
 
-	fullURL := s.baseURL + "/db/neo4j/query/v2"
+	fullURL := fmt.Sprintf("%s/db/%s/query/v2", s.baseURL, s.database)
 
 	s.logger.DebugContext(ctx, "making authenticated API request",
+		slog.String("URL", fullURL),
 		slog.String("header content", headers["Content-Type"]),
 		slog.String("header auth", headers["Authorization"]),
 		slog.String("header accept", headers["Accept"]),

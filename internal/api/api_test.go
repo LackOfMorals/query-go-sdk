@@ -24,6 +24,7 @@ func newTestService(mock *testutil.MockHTTPService) *apiRequestService {
 		httpClient: mock,
 		authHeader: &BasicCredentials{Username: "neo4j", Password: "test"},
 		baseURL:    "http://localhost:7474",
+		database:   "neo4j",
 		userAgent:  "test-agent/1.0",
 		logger:     testLogger(),
 	}
